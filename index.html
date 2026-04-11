@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EduGestión</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- LOGIN — genérico, sin nombre de institución hasta que el usuario ingresa -->
+<div id="login-screen">
+  <div class="l-logo">
+    <svg viewBox="0 0 48 48" width="52" height="52" fill="none">
+      <rect width="48" height="48" rx="14" fill="#1a4a2e"/>
+      <path d="M12 24 L24 14 L36 24 L36 36 L12 36 Z" fill="none" stroke="#b8963e" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M19 36 L19 28 L24 24 L29 28 L29 36" fill="#b8963e"/>
+      <circle cx="24" cy="20" r="2.5" fill="#b8963e"/>
+    </svg>
+  </div>
+  <div class="l-nombre">EduGestión</div>
+  <div class="l-sub">Sistema de gestión escolar institucional</div>
+
+  <div class="l-card">
+    <div class="l-card-t">Iniciar sesión</div>
+    <div class="l-card-s">Ingresá con tu cuenta institucional</div>
+
+    <div id="login-error" class="login-error" style="display:none"></div>
+
+    <div class="l-form">
+      <label class="l-label">Email</label>
+      <input type="email" id="inp-email" placeholder="tu@institucion.edu.ar" autocomplete="email">
+      <label class="l-label" style="margin-top:10px">Contraseña</label>
+      <input type="password" id="inp-pass" placeholder="Tu contraseña" autocomplete="current-password">
+    </div>
+
+    <button class="btn-ing" id="btn-login" onclick="login()">
+      <span id="btn-login-text">Ingresar</span>
+    </button>
+
+    <div class="l-hint">
+      ¿Problemas para ingresar? Contactá al administrador de tu institución.
+    </div>
+  </div>
+</div>
+
+<!-- SHELL: visible tras login exitoso -->
+<div id="shell" style="display:none">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+    <div class="sb-top">
+      <!-- Logo/nombre de la institución se carga dinámicamente -->
+      <div class="sb-inst-logo" id="sb-inst-logo">E</div>
+      <span class="sb-nombre" id="sb-inst-nombre">EduGestión</span>
+      <button class="sb-toggle" onclick="toggleSidebar()" title="Contraer menú">☰</button>
+    </div>
+    <div class="sb-user">
+      <div class="sb-av" id="sb-av">—</div>
+      <div class="sb-u-info">
+        <div class="sb-u-nombre" id="sb-nombre">—</div>
+        <div class="sb-u-rol"    id="sb-rol">—</div>
+      </div>
+    </div>
+    <div class="sb-nav" id="sb-nav"></div>
+    <div class="sb-bottom">
+      <button class="dark-toggle" onclick="toggleDark()">
+        <span id="theme-icon">🌙</span>
+        <span class="dt-label" id="dark-label">Modo oscuro</span>
+      </button>
+      <button class="btn-salir" onclick="cerrarSesion()">
+        <span>⏻</span>
+        <span class="sal-label">Cerrar sesión</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <button class="tb-back" id="tb-back" onclick="goBack()" title="Volver">‹</button>
+      <div class="tb-title" id="tb-title">Inicio</div>
+      <div class="tb-right">
+        <div class="notif-btn" onclick="toggleNotifPanel()" title="Notificaciones">
+          🔔<span class="notif-count" id="notif-count" style="display:none">0</span>
+        </div>
+        <span class="tb-clock" id="tb-clock">--:--</span>
+        <button class="tb-theme" onclick="toggleDark()"><span id="tb-theme-icon">🌙</span></button>
+      </div>
+    </div>
+
+    <!-- Panel notificaciones -->
+    <div id="notif-panel" class="notif-panel" style="display:none">
+      <div class="notif-panel-header">
+        <span style="font-size:13px;font-weight:600">Notificaciones</span>
+        <button onclick="marcarTodasLeidas()" style="font-size:10px;color:var(--verde);background:none;border:none;cursor:pointer">
+          Marcar todas leídas
+        </button>
+      </div>
+      <div id="notif-lista"><div class="loading-state small"><div class="spinner"></div></div></div>
+    </div>
+
+    <div class="content">
+      <div class="page on" id="page-dash"></div>
+      <div class="page"    id="page-prob"></div>
+      <div class="page"    id="page-obj"></div>
+      <div class="page"    id="page-reuniones"></div>
+      <div class="page"    id="page-asist"></div>
+      <div class="page"    id="page-notas"></div>
+      <div class="page"    id="page-leg"></div>
+      <div class="page"    id="page-eoe"></div>
+      <div class="page"    id="page-admin"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- Configuración -->
+<script src="js/config.js"></script>
+
+<!-- Módulos de datos (deben cargarse ANTES que main.js) -->
+<script src="js/nav.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/problematicas.js"></script>
+<script src="js/modulos.js"></script>
+<script src="js/reuniones.js"></script>
+
+<!-- Auth y arranque (DESPUÉS de todos los módulos) -->
+<script src="js/auth.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
