@@ -129,7 +129,14 @@ function iniciarReloj() {
 
 // ── UTILIDADES GLOBALES ───────────────────────────────
 function labelRol(rol) {
-  return { directivo:'Directivo/a', eoe:'Orientador/a EOE', docente:'Docente', preceptor:'Preceptor/a', admin:'Admin' }[rol] || rol;
+  return {
+    director_general: 'Dirección general',
+    directivo_nivel:  'Directivo/a',
+    eoe:              'Orientador/a EOE',
+    docente:          'Docente',
+    preceptor:        'Preceptor/a',
+    admin:            'Administrador',
+  }[rol] || rol;
 }
 
 function generarIniciales(nombre) {
