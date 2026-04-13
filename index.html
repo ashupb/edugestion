@@ -31,7 +31,12 @@
       <label class="l-label">Email</label>
       <input type="email" id="inp-email" placeholder="tu@institucion.edu.ar" autocomplete="email">
       <label class="l-label" style="margin-top:10px">Contraseña</label>
+      <div style="position:relative">
       <input type="password" id="inp-pass" placeholder="Tu contraseña" autocomplete="current-password">
+      <button type="button" onclick="togglePass()" 
+        style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:#5d6d7e;padding:0"
+        id="btn-ojo">👁</button>
+      </div>
     </div>
 
     <button class="btn-ing" id="btn-login" onclick="login()">
@@ -78,7 +83,8 @@
   <!-- MAIN -->
   <div class="main">
     <div class="topbar">
-      <button class="tb-back" id="tb-back" onclick="goBack()" title="Volver">‹</button>
+      <button class="btn-hamburger" onclick="toggleMobileSidebar()" title="Menú">☰</button>
+      <button class="tb-back" id="tb-back" onclick="goBack()">‹</button>
       <div class="tb-title" id="tb-title">Inicio</div>
       <div class="tb-right">
         <div class="notif-btn" onclick="toggleNotifPanel()" title="Notificaciones">
@@ -109,6 +115,7 @@
       <div class="page"    id="page-notas"></div>
       <div class="page"    id="page-leg"></div>
       <div class="page"    id="page-eoe"></div>
+      <div class="page"    id="page-agenda"></div>
       <div class="page"    id="page-admin"></div>
     </div>
   </div>
@@ -117,19 +124,29 @@
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<!-- Configuración -->
+<!-- Config -->
 <script src="js/config.js"></script>
 
-<!-- Módulos de datos (deben cargarse ANTES que main.js) -->
+<!-- Módulos -->
 <script src="js/nav.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/problematicas.js"></script>
 <script src="js/modulos.js"></script>
-<script src="js/reuniones.js"></script>
+<script src="js/agenda.js"></script>
+<script src="js/asistencia.js"></script>
 
-<!-- Auth y arranque (DESPUÉS de todos los módulos) -->
+<!-- Auth y arranque (siempre al final) -->
 <script src="js/auth.js"></script>
 <script src="js/main.js"></script>
+
+<!-- Overlay sidebar mobile -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
+
+  <!-- Navegación inferior mobile -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <div class="bottom-nav-items" id="bottom-nav-items"></div>
+  </nav>
+
 </body>
 </html>

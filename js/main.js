@@ -12,12 +12,12 @@ const PAGE_LABELS = {
   dash:      'Inicio',
   prob:      'Problemáticas',
   obj:       'Objetivos institucionales',
-  reuniones: 'Reuniones y actividades',
   asist:     'Asistencia',
   notas:     'Calificaciones',
   leg:       'Legajos',
   eoe:       'Equipo de orientación',
   admin:     'Datos institucionales',
+  agenda:    'Agenda institucional',
 };
 
 // ── ARRANQUE ─────────────────────────────────────────
@@ -45,6 +45,7 @@ async function iniciarApp() {
   iniciarReloj();
   renderNav();
   cargarNotificaciones();
+  renderBottomNav();
   await goPage('dash');
 }
 
@@ -69,13 +70,26 @@ async function goPage(id) {
     dash:      rDash,
     prob:      rProb,
     obj:       rObj,
-    reuniones: rReuniones,
     asist:     rAsist,
     leg:       rLeg,
     eoe:       rEOE,
     admin:     rAdmin,
+    agenda:    rAgenda,
   };
   if (renderers[id]) await renderers[id]();
+
+  renderBottomNav();
+// Cerrar sidebar mobile si estaba abierto
+document.getElementById('sidebar')?.classList.remove('mobile-open');
+document.getElementById('sidebar-overlay')?.classList.remove('on');
+
+// Cerrar sidebar mobile al navegar
+const sb2 = document.getElementById('sidebar');
+const ov2 = document.getElementById('sidebar-overlay');
+if (sb2) sb2.classList.remove('mobile-open');
+if (ov2) ov2.classList.remove('on');
+renderBottomNav();
+
 }
 
 function goBack() {
@@ -204,3 +218,81 @@ document.addEventListener('keydown', e => {
     if (ls && ls.style.display !== 'none') login();
   }
 });
+
+// ── MOBILE SIDEBAR ────────────────────────────────────
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!sidebar || !overlay) return;
+  const isOpen = sidebar.classList.contains('mobile-open');
+  if (isOpen) {
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('on');
+  } else {
+    sidebar.classList.add('mobile-open');
+    overlay.classList.add('on');
+  }
+}
+
+// ── BOTTOM NAV MOBILE ─────────────────────────────────
+const BOTTOM_NAV_ITEMS = {
+  director_general: [
+    { id:'dash',    icon:'🏠', label:'Inicio' },
+    { id:'agenda',  icon:'📅', label:'Agenda' },
+    { id:'prob',    icon:'⚠️', label:'Situaciones' },
+    { id:'leg',     icon:'🗂️', label:'Legajos' },
+    { id:'obj',     icon:'🎯', label:'Objetivos' },
+  ],
+  directivo_nivel: [
+    { id:'dash',    icon:'🏠', label:'Inicio' },
+    { id:'agenda',  icon:'📅', label:'Agenda' },
+    { id:'prob',    icon:'⚠️', label:'Situaciones' },
+    { id:'leg',     icon:'🗂️', label:'Legajos' },
+    { id:'obj',     icon:'🎯', label:'Objetivos' },
+  ],
+  eoe: [
+    { id:'dash',    icon:'🏠', label:'Inicio' },
+    { id:'agenda',  icon:'📅', label:'Agenda' },
+    { id:'eoe',     icon:'🧠', label:'Casos' },
+    { id:'leg',     icon:'🗂️', label:'Legajos' },
+    { id:'prob',    icon:'⚠️', label:'Situaciones' },
+  ],
+  docente: [
+    { id:'dash',    icon:'🏠', label:'Inicio' },
+    { id:'agenda',  icon:'📅', label:'Agenda' },
+    { id:'asist',   icon:'✅', label:'Asistencia' },
+    { id:'notas',   icon:'📊', label:'Notas' },
+    { id:'prob',    icon:'⚠️', label:'Reportar' },
+  ],
+  preceptor: [
+    { id:'dash',    icon:'🏠', label:'Inicio' },
+    { id:'agenda',  icon:'📅', label:'Agenda' },
+    { id:'asist',   icon:'✅', label:'Lista' },
+    { id:'leg',     icon:'🗂️', label:'Legajos' },
+    { id:'prob',    icon:'⚠️', label:'Reportar' },
+  ],
+};
+
+function renderBottomNav() {
+  const contenedor = document.getElementById('bottom-nav-items');
+  if (!contenedor) return;
+  const rol   = USUARIO_ACTUAL?.rol;
+  const items = BOTTOM_NAV_ITEMS[rol] || BOTTOM_NAV_ITEMS.docente;
+  contenedor.innerHTML = items.map(item => `
+    <button class="bn-item ${CUR_PAGE === item.id ? 'on' : ''}" onclick="goPage('${item.id}')">
+      <span class="bn-icon">${item.icon}</span>
+      <span class="bn-label">${item.label}</span>
+    </button>`).join('');
+}
+
+function togglePass() {
+  const inp = document.getElementById('inp-pass');
+  const btn = document.getElementById('btn-ojo');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    btn.textContent = '🙈';
+  } else {
+    inp.type = 'password';
+    btn.textContent = '👁';
+  }
+}

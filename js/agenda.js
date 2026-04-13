@@ -1,0 +1,657 @@
+// =====================================================
+// AGENDA.JS — Calendario institucional v3
+// =====================================================
+
+let AGENDA_MES     = new Date().getMonth();
+let AGENDA_ANIO    = new Date().getFullYear();
+let AGENDA_NIVEL   = 'todos';
+let TIPOS_EVENTO   = [];
+let USUARIOS_INST  = [];
+
+const NIVEL_CONFIG = {
+  inicial:    { color: '#1a7a4a', bg: '#e8f5ee', label: '🌱 Inicial' },
+  primario:   { color: '#1a5276', bg: '#eaf2fb', label: '📚 Primario' },
+  secundario: { color: '#6c3483', bg: '#f5eef8', label: '🎓 Secundario' },
+  todos:      { color: '#b8963e', bg: '#fdf6e8', label: '🏫 Toda la institución' },
+};
+
+const GRUPOS_CONV = [
+  { id: 'equipo_directivo', label: 'Equipo Directivo' },
+  { id: 'director_general', label: 'Director/a General' },
+  { id: 'docentes',         label: 'Docentes' },
+  { id: 'alumnos',          label: 'Alumnos' },
+  { id: 'familias',         label: 'Familias' },
+  { id: 'comunidad',        label: 'Comunidad educativa' },
+];
+
+const MESES_NOMBRES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DIAS_NOMBRES  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+const HORAS_OPTS = (() => {
+  const opts = [];
+  for (let h = 7; h <= 22; h++) {
+    opts.push(`${String(h).padStart(2,'0')}:00`);
+    if (h < 22) opts.push(`${String(h).padStart(2,'0')}:30`);
+  }
+  return opts;
+})();
+
+// ─── RENDER PRINCIPAL ─────────────────────────────────
+async function rAgenda() {
+  const c = document.getElementById('page-agenda');
+  showLoading('agenda');
+
+  const instId = USUARIO_ACTUAL.institucion_id;
+  const rol    = USUARIO_ACTUAL.rol;
+
+  const [tiposRes, usuariosRes] = await Promise.all([
+    sb.from('tipos_evento').select('*').eq('institucion_id', instId).eq('activo', true).order('nombre'),
+    sb.from('usuarios').select('id, nombre_completo, rol, nivel, avatar_iniciales').eq('institucion_id', instId).order('nombre_completo'),
+  ]);
+  TIPOS_EVENTO  = tiposRes.data  || [];
+  USUARIOS_INST = usuariosRes.data || [];
+
+  const primerDia = new Date(AGENDA_ANIO, AGENDA_MES, 1);
+  const ultimoDia = new Date(AGENDA_ANIO, AGENDA_MES + 1, 0);
+  const desde = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, 1);
+  const hasta  = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, ultimoDia.getDate());
+
+  let query = sb.from('eventos_institucionales')
+    .select('*, usuarios(nombre_completo)')
+    .eq('institucion_id', instId)
+    .gte('fecha_inicio', desde)
+    .lte('fecha_inicio', hasta)
+    .order('fecha_inicio');
+
+  if (rol === 'directivo_nivel') {
+    query = query.in('nivel', [USUARIO_ACTUAL.nivel, 'todos']);
+  }
+
+  const { data: eventos } = await query;
+
+  const eventosFiltrados = (eventos || []).filter(e =>
+    AGENDA_NIVEL === 'todos' || e.nivel === AGENDA_NIVEL || e.nivel === 'todos'
+  );
+
+  const puedeCrear = ['director_general','directivo_nivel','docente','preceptor','eoe'].includes(rol);
+
+  const tabsHTML = (rol === 'director_general' || rol === 'directivo_nivel') ? `
+    <div class="nivel-tabs-ag" style="margin-bottom:14px">
+      ${Object.entries(NIVEL_CONFIG).map(([k,v]) => `
+        <button class="nivel-tab-ag ${AGENDA_NIVEL===k?'on':''}"
+          style="${AGENDA_NIVEL===k?`background:${v.color};color:#fff;border-color:${v.color}`:''}"
+          onclick="setAgendaNivel('${k}')">${v.label}
+        </button>`).join('')}
+    </div>` : '';
+
+  const leyendaHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <span style="font-size:10px;color:var(--txt3);font-weight:700">NIVELES:</span>
+      ${Object.entries(NIVEL_CONFIG).map(([k,v]) => `
+        <span style="font-size:10px;padding:2px 10px;border-radius:20px;background:${v.bg};color:${v.color};border:1px solid ${v.color}40;font-weight:500">${v.label}</span>
+      `).join('')}
+    </div>`;
+
+  c.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="pg-t">Agenda institucional</div>
+        <div class="pg-s">${MESES_NOMBRES[AGENDA_MES]} ${AGENDA_ANIO}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn-s" style="font-size:11px;padding:6px 10px" onclick="cambiarMes(-1)">← Anterior</button>
+        <button class="btn-s" style="font-size:11px;padding:6px 10px" onclick="irHoy()">Hoy</button>
+        <button class="btn-s" style="font-size:11px;padding:6px 10px" onclick="cambiarMes(1)">Siguiente →</button>
+        ${puedeCrear ? `<button class="btn-p" style="font-size:11px" onclick="abrirFormEvento()">+ Nuevo evento</button>` : ''}
+      </div>
+    </div>
+    ${tabsHTML}
+    ${leyendaHTML}
+    <div id="form-evento"></div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      ${buildCalGrid(eventosFiltrados, primerDia, ultimoDia)}
+    </div>
+    <div id="detalle-evento"></div>`;
+
+  inyectarEstilosAgenda();
+}
+
+// ─── GRILLA ───────────────────────────────────────────
+function buildCalGrid(eventos, primerDia, ultimoDia) {
+  const evPorDia = {};
+  eventos.forEach(e => {
+    const d = e.fecha_inicio;
+    if (!evPorDia[d]) evPorDia[d] = [];
+    evPorDia[d].push(e);
+  });
+  Object.keys(evPorDia).forEach(d => {
+    evPorDia[d].sort((a, b) => {
+      if (!a.hora) return 1;
+      if (!b.hora) return -1;
+      return a.hora.localeCompare(b.hora);
+    });
+  });
+
+  const hoyISO = new Date().toISOString().split('T')[0];
+  const inicioSemana = primerDia.getDay();
+  const totalDias = ultimoDia.getDate();
+
+  let html = `
+    <div class="cal-header-ag">
+      ${DIAS_NOMBRES.map(d => `<div class="cal-th-ag">${d}</div>`).join('')}
+    </div>
+    <div class="cal-body-ag">`;
+
+  for (let i = 0; i < inicioSemana; i++) html += `<div class="cal-cell-ag empty"></div>`;
+
+  for (let dia = 1; dia <= totalDias; dia++) {
+    const fechaStr = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, dia);
+    const esHoy = fechaStr === hoyISO;
+    const evs   = evPorDia[fechaStr] || [];
+
+    html += `<div class="cal-cell-ag ${esHoy?'hoy':''}">
+  <div class="cal-dia-num-ag ${esHoy?'hoy':''}">${dia}</div>
+  ${evs.slice(0, 3).map(e => {
+    const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
+    return `<div class="cal-ev-chip-ag"
+      style="background:${nc.bg};color:${nc.color};border-left:3px solid ${nc.color}"
+      onclick="verEvento('${e.id}')"
+      title="${e.hora ? e.hora+' · ' : ''}${e.nombre}">
+      ${e.hora ? `<span style="opacity:.7;margin-right:2px">${e.hora}</span>` : ''}${e.nombre.length > 18 ? e.nombre.substring(0,18)+'…' : e.nombre}
+    </div>`;
+  }).join('')}
+  ${evs.length > 0 ? `
+  <div class="cal-dots">
+    ${evs.slice(0,4).map(e => {
+      const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
+      return `<div class="cal-dot" style="background:${nc.color}" onclick="verEvento('${e.id}')" title="${e.nombre}"></div>`;
+    }).join('')}
+  </div>` : ''}
+  ${evs.length > 3 ? `<div style="font-size:9px;color:var(--txt3);padding:1px 4px">+${evs.length-3}</div>` : ''}
+</div>`;
+  }
+
+  const resto = (inicioSemana + totalDias) % 7;
+  if (resto > 0) for (let i = 0; i < 7-resto; i++) html += `<div class="cal-cell-ag empty"></div>`;
+
+  return html + `</div>`;
+}
+
+// ─── VER DETALLE ──────────────────────────────────────
+async function verEvento(id) {
+  const { data: e } = await sb.from('eventos_institucionales')
+    .select('*, usuarios(nombre_completo)').eq('id', id).single();
+  if (!e) return;
+
+  const nc   = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
+  const tipo = TIPOS_EVENTO.find(t => t.id === e.tipo_id);
+
+  const convGrupos = (e.convocatoria_grupos || [])
+    .map(g => GRUPOS_CONV.find(x => x.id === g)?.label).filter(Boolean);
+
+  const convPersonas = (e.convocados_ids || [])
+    .map(uid => USUARIOS_INST.find(u => u.id === uid)?.nombre_completo).filter(Boolean);
+
+  const responsables = (e.responsables_ids || [])
+    .map(uid => USUARIOS_INST.find(u => u.id === uid)?.nombre_completo).filter(Boolean);
+
+  const puedeEditar = USUARIO_ACTUAL.rol === 'director_general' || e.creado_por === USUARIO_ACTUAL.id;
+
+  document.getElementById('detalle-evento').innerHTML = `
+    <div class="card" style="border-left:4px solid ${nc.color};margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">${e.nombre}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-size:10px;padding:2px 10px;border-radius:20px;background:${nc.bg};color:${nc.color};border:1px solid ${nc.color}40">${nc.label}</span>
+            ${tipo ? `<span class="tag tgr">${tipo.nombre}</span>` : ''}
+          </div>
+        </div>
+        <button onclick="document.getElementById('detalle-evento').innerHTML=''"
+          style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--txt2);margin-left:8px">×</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <div class="sec-lb" style="margin:0 0 2px">Fecha</div>
+          <div style="font-size:12px">
+            ${formatFechaLatam(e.fecha_inicio)}
+            ${e.fecha_fin && e.fecha_fin !== e.fecha_inicio ? ' → '+formatFechaLatam(e.fecha_fin) : ''}
+            ${e.hora ? ' · '+e.hora : ''}
+          </div>
+        </div>
+        <div>
+          <div class="sec-lb" style="margin:0 0 2px">Lugar</div>
+          <div style="font-size:12px">${e.lugar || '—'}</div>
+        </div>
+        ${convGrupos.length ? `
+        <div>
+          <div class="sec-lb" style="margin:0 0 2px">Convocatoria</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${convGrupos.map(g => `<span class="tag tgr">${g}</span>`).join('')}
+          </div>
+        </div>` : ''}
+        ${responsables.length ? `
+        <div>
+          <div class="sec-lb" style="margin:0 0 2px">Responsable(s)</div>
+          <div style="font-size:12px">${responsables.join(', ')}</div>
+        </div>` : ''}
+        ${convPersonas.length ? `
+        <div style="grid-column:1/-1">
+          <div class="sec-lb" style="margin:0 0 4px">Convocados</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${convPersonas.map(n => `<span class="tag tp">${n.split(',')[0]}</span>`).join('')}
+          </div>
+        </div>` : ''}
+      </div>
+
+      ${e.descripcion ? `<div style="margin-top:10px;font-size:11px;color:var(--txt2);line-height:1.6;border-top:1px solid var(--brd);padding-top:10px">${e.descripcion}</div>` : ''}
+
+      ${puedeEditar ? `
+      <div class="acc" style="margin-top:12px">
+        <button class="btn-s" style="font-size:10px" onclick="editarEvento('${e.id}')">✏️ Editar</button>
+        <button class="btn-d" style="font-size:10px" onclick="eliminarEvento('${e.id}')">Eliminar</button>
+      </div>` : ''}
+    </div>`;
+}
+
+async function eliminarEvento(id) {
+  if (!confirm('¿Eliminás este evento?')) return;
+  await sb.from('eventos_institucionales').delete().eq('id', id);
+  document.getElementById('detalle-evento').innerHTML = '';
+  rAgenda();
+}
+
+async function editarEvento(id) {
+  const { data: e } = await sb.from('eventos_institucionales').select('*').eq('id', id).single();
+  if (!e) return;
+  document.getElementById('detalle-evento').innerHTML = '';
+  abrirFormEvento(e);
+}
+
+// ─── FORMULARIO ───────────────────────────────────────
+function abrirFormEvento(eventoExistente = null) {
+  const rol        = USUARIO_ACTUAL?.rol;
+  const esDirector = rol === 'director_general';
+  const esEdicion  = !!eventoExistente;
+  const e          = eventoExistente || {};
+
+  const nivelesDisp = esDirector
+    ? ['todos','inicial','primario','secundario']
+    : [USUARIO_ACTUAL.nivel || 'todos'];
+
+  document.getElementById('form-evento').innerHTML = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px">
+        ${esEdicion ? '✏️ Editar evento' : 'Nuevo evento'}
+      </div>
+
+      <div class="form-grid-2-ag">
+
+        <div style="grid-column:1/-1">
+          <div class="sec-lb">Nombre del evento *</div>
+          <input type="text" id="ev-nombre" placeholder="Ej: Día del Maestro" value="${e.nombre || ''}">
+        </div>
+
+        <div>
+          <div class="sec-lb">Tipo de evento</div>
+          <select id="ev-tipo" class="sel-estilizado">
+            <option value="">— Seleccioná —</option>
+            ${TIPOS_EVENTO.map(t => `<option value="${t.id}" ${e.tipo_id===t.id?'selected':''}>${t.nombre}</option>`).join('')}
+          </select>
+          ${esDirector ? `<div style="font-size:10px;color:var(--verde);margin-top:4px;cursor:pointer" onclick="abrirNuevoTipo()">+ Agregar tipo</div>` : ''}
+          <div id="form-nuevo-tipo"></div>
+        </div>
+
+        <div>
+          <div class="sec-lb">Nivel *</div>
+          <select id="ev-nivel" class="sel-estilizado">
+            ${nivelesDisp.map(n => `<option value="${n}" ${(e.nivel||'todos')===n?'selected':''}>${NIVEL_CONFIG[n]?.label||n}</option>`).join('')}
+          </select>
+        </div>
+
+        <div>
+          <div class="sec-lb">Fecha inicio *</div>
+          <input type="date" id="ev-fecha-ini" class="input-fecha" value="${e.fecha_inicio||''}">
+        </div>
+
+        <div>
+          <div class="sec-lb">Fecha fin (si dura varios días)</div>
+          <input type="date" id="ev-fecha-fin" class="input-fecha" value="${e.fecha_fin||''}">
+        </div>
+
+        <div>
+          <div class="sec-lb">Hora</div>
+          <select id="ev-hora" class="sel-estilizado">
+            <option value="">— Sin hora —</option>
+            ${HORAS_OPTS.map(h => `<option value="${h}" ${e.hora===h?'selected':''}>${h}</option>`).join('')}
+          </select>
+        </div>
+
+        <div>
+          <div class="sec-lb">Lugar</div>
+          <input type="text" id="ev-lugar" placeholder="Ej: Salón de actos" value="${e.lugar||''}">
+        </div>
+
+        <div style="grid-column:1/-1">
+          <div class="sec-lb">Convocatoria — grupos</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="chip" onclick="toggleTodosGrupos(this)">Todos</button>
+            ${GRUPOS_CONV.map(g => `
+              <button type="button" class="chip ${(e.convocatoria_grupos||[]).includes(g.id)?'on':''}"
+                data-grupo="${g.id}" onclick="this.classList.toggle('on')">${g.label}
+              </button>`).join('')}
+          </div>
+        </div>
+
+        <div style="grid-column:1/-1">
+          <div class="sec-lb">Personas convocadas</div>
+          <div class="usr-search-wrap">
+            <input type="text" class="usr-search-inp" id="busq-conv"
+              placeholder="🔍 Buscar persona..."
+              oninput="filtrarDropdown('conv')"
+              onfocus="showDrop('conv')"
+              autocomplete="off">
+            <div id="drop-conv" class="usr-dropdown" style="display:none">
+              ${renderDropdownOpts('conv', e.convocados_ids||[])}
+            </div>
+          </div>
+          <div id="chips-conv" class="chips-sel">
+            ${(e.convocados_ids||[]).map(uid => chipUsuario(uid,'conv')).join('')}
+          </div>
+        </div>
+
+        <div style="grid-column:1/-1">
+          <div class="sec-lb">Responsable(s)</div>
+          <div class="usr-search-wrap">
+            <input type="text" class="usr-search-inp" id="busq-resp"
+              placeholder="🔍 Buscar responsable..."
+              oninput="filtrarDropdown('resp')"
+              onfocus="showDrop('resp')"
+              autocomplete="off">
+            <div id="drop-resp" class="usr-dropdown" style="display:none">
+              ${renderDropdownOpts('resp', e.responsables_ids||[])}
+            </div>
+          </div>
+          <div id="chips-resp" class="chips-sel">
+            ${(e.responsables_ids||[]).map(uid => chipUsuario(uid,'resp')).join('')}
+          </div>
+        </div>
+
+        <div style="grid-column:1/-1">
+          <div class="sec-lb">Descripción</div>
+          <textarea id="ev-desc" rows="2" placeholder="Detalles adicionales...">${e.descripcion||''}</textarea>
+        </div>
+
+      </div>
+
+      <div class="acc" style="margin-top:14px">
+        <button class="btn-p" onclick="guardarEvento('${esEdicion?e.id:''}')">
+          ${esEdicion ? 'Guardar cambios' : 'Crear evento'}
+        </button>
+        <button class="btn-s" onclick="document.getElementById('form-evento').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+
+  document.addEventListener('click', cerrarDropdowns);
+}
+
+// ─── DROPDOWNS DE USUARIOS ────────────────────────────
+function renderDropdownOpts(tipo, seleccionados) {
+  return USUARIOS_INST.map(u => `
+    <div class="usr-opt ${seleccionados.includes(u.id)?'sel':''}"
+      onclick="agregarUsuario('${tipo}','${u.id}')"
+      data-nombre="${u.nombre_completo.toLowerCase()}"
+      data-uid="${u.id}">
+      <span class="chip-av-sm">${u.avatar_iniciales||u.nombre_completo[0]}</span>
+      ${u.nombre_completo}
+      <span style="font-size:9px;color:var(--txt3);margin-left:auto">${labelRol(u.rol)}</span>
+    </div>`).join('');
+}
+
+function showDrop(tipo) {
+  document.getElementById(`drop-${tipo}`).style.display = 'block';
+}
+
+function cerrarDropdowns(e) {
+  ['conv','resp'].forEach(t => {
+    const drop = document.getElementById(`drop-${t}`);
+    const inp  = document.getElementById(`busq-${t}`);
+    if (drop && inp && !drop.contains(e.target) && e.target !== inp) {
+      drop.style.display = 'none';
+    }
+  });
+}
+
+function filtrarDropdown(tipo) {
+  const q    = document.getElementById(`busq-${tipo}`)?.value?.toLowerCase() || '';
+  const drop = document.getElementById(`drop-${tipo}`);
+  if (!drop) return;
+  drop.style.display = 'block';
+  drop.querySelectorAll('.usr-opt').forEach(el => {
+    el.style.display = el.dataset.nombre?.includes(q) ? 'flex' : 'none';
+  });
+}
+
+function agregarUsuario(tipo, uid) {
+  const chips = document.getElementById(`chips-${tipo}`);
+  if (!chips || chips.querySelector(`[data-uid="${uid}"]`)) {
+    document.getElementById(`drop-${tipo}`).style.display = 'none';
+    return;
+  }
+  chips.insertAdjacentHTML('beforeend', chipUsuario(uid, tipo));
+  const opt = document.querySelector(`#drop-${tipo} [data-uid="${uid}"]`);
+  if (opt) opt.classList.add('sel');
+  // Cerrar y limpiar inmediatamente
+  const inp = document.getElementById(`busq-${tipo}`);
+  if (inp) inp.value = '';
+  document.getElementById(`drop-${tipo}`).style.display = 'none';
+  document.querySelectorAll(`#drop-${tipo} .usr-opt`).forEach(el => el.style.display = 'flex');
+}
+
+function chipUsuario(uid, tipo) {
+  const u = USUARIOS_INST.find(x => x.id === uid);
+  if (!u) return '';
+  return `<span class="chip-sel" data-uid="${uid}">
+    <span class="chip-av-sm">${u.avatar_iniciales||u.nombre_completo[0]}</span>
+    ${u.nombre_completo.split(',')[0]}
+    <span onclick="quitarUsuario('${tipo}','${uid}')" style="cursor:pointer;margin-left:4px;opacity:.6">×</span>
+  </span>`;
+}
+
+function quitarUsuario(tipo, uid) {
+  document.getElementById(`chips-${tipo}`)?.querySelector(`[data-uid="${uid}"]`)?.remove();
+  const opt = document.querySelector(`#drop-${tipo} [data-uid="${uid}"]`);
+  if (opt) opt.classList.remove('sel');
+}
+
+function toggleTodosGrupos(btn) {
+  const activo = btn.classList.toggle('on');
+  document.querySelectorAll('[data-grupo]').forEach(b =>
+    activo ? b.classList.add('on') : b.classList.remove('on')
+  );
+}
+
+function abrirNuevoTipo() {
+  document.getElementById('form-nuevo-tipo').innerHTML = `
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <input type="text" id="nuevo-tipo-nombre" placeholder="Nombre del tipo" style="flex:1">
+      <button class="btn-p" style="font-size:10px" onclick="guardarNuevoTipo()">Agregar</button>
+    </div>`;
+}
+
+async function guardarNuevoTipo() {
+  const nombre = document.getElementById('nuevo-tipo-nombre')?.value?.trim();
+  if (!nombre) return;
+  const { data } = await sb.from('tipos_evento').insert({
+    institucion_id: USUARIO_ACTUAL.institucion_id,
+    nombre, es_base: false, activo: true,
+  }).select().single();
+  if (data) {
+    TIPOS_EVENTO.push(data);
+    const sel = document.getElementById('ev-tipo');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = data.id; opt.textContent = data.nombre; opt.selected = true;
+      sel.appendChild(opt);
+    }
+    document.getElementById('form-nuevo-tipo').innerHTML =
+      `<div style="font-size:10px;color:var(--verde);margin-top:3px">✓ "${nombre}" agregado</div>`;
+  }
+}
+
+// ─── GUARDAR EVENTO ───────────────────────────────────
+async function guardarEvento(eventoId) {
+  eventoId = eventoId || '';
+
+  const nombre   = document.getElementById('ev-nombre')?.value?.trim();
+  const fechaIni = document.getElementById('ev-fecha-ini')?.value;
+
+  if (!nombre)   { alert('El nombre es obligatorio.'); return; }
+  if (!fechaIni) { alert('La fecha de inicio es obligatoria.'); return; }
+
+  // Normalizar fecha a YYYY-MM-DD (algunos navegadores devuelven MM/DD/YYYY)
+  let fechaNorm = fechaIni;
+  if (fechaIni.includes('/')) {
+    const partes = fechaIni.split('/');
+    fechaNorm = `${partes[2]}-${partes[0].padStart(2,'0')}-${partes[1].padStart(2,'0')}`;
+  }
+
+  const fechaFinRaw = document.getElementById('ev-fecha-fin')?.value || '';
+  let fechaFin = fechaFinRaw || null;
+  if (fechaFinRaw && fechaFinRaw.includes('/')) {
+    const partes = fechaFinRaw.split('/');
+    fechaFin = `${partes[2]}-${partes[0].padStart(2,'0')}-${partes[1].padStart(2,'0')}`;
+  }
+
+  const hora         = document.getElementById('ev-hora')?.value || null;
+  const grupos       = Array.from(document.querySelectorAll('[data-grupo].on')).map(b => b.dataset.grupo);
+  const convocados   = Array.from(document.getElementById('chips-conv')?.querySelectorAll('[data-uid]')||[]).map(b => b.dataset.uid);
+  const responsables = Array.from(document.getElementById('chips-resp')?.querySelectorAll('[data-uid]')||[]).map(b => b.dataset.uid);
+
+  const payload = {
+    nombre,
+    tipo_id:             document.getElementById('ev-tipo')?.value || null,
+    nivel:               document.getElementById('ev-nivel')?.value,
+    fecha_inicio:        fechaNorm,
+    fecha_fin:           fechaFin,
+    hora:                hora || null,
+    lugar:               document.getElementById('ev-lugar')?.value || null,
+    descripcion:         document.getElementById('ev-desc')?.value || null,
+    convocatoria_grupos: grupos,
+    convocados_ids:      convocados,
+    responsables_ids:    responsables,
+  };
+
+  let error, data;
+
+  if (eventoId) {
+    ({ error } = await sb.from('eventos_institucionales').update(payload).eq('id', eventoId));
+  } else {
+    ({ data, error } = await sb.from('eventos_institucionales').insert({
+      ...payload,
+      institucion_id: USUARIO_ACTUAL.institucion_id,
+      creado_por:     USUARIO_ACTUAL.id,
+    }).select().single());
+
+    if (!error && data && convocados.length) {
+      await sb.from('evento_respuestas').insert(
+        convocados.map(uid => ({
+          evento_id:  data.id,
+          usuario_id: uid,
+          respuesta:  'pendiente',
+        }))
+      );
+    }
+  }
+
+  if (error) { alert('Error al guardar: ' + error.message); return; }
+
+  document.getElementById('form-evento').innerHTML = '';
+  const d = new Date(fechaNorm + 'T12:00:00');
+  AGENDA_MES  = d.getMonth();
+  AGENDA_ANIO = d.getFullYear();
+  rAgenda();
+}
+
+// ─── NAVEGACIÓN ───────────────────────────────────────
+function cambiarMes(delta) {
+  AGENDA_MES += delta;
+  if (AGENDA_MES > 11) { AGENDA_MES = 0;  AGENDA_ANIO++; }
+  if (AGENDA_MES < 0)  { AGENDA_MES = 11; AGENDA_ANIO--; }
+  rAgenda();
+}
+
+function irHoy() {
+  const h = new Date();
+  AGENDA_MES = h.getMonth();
+  AGENDA_ANIO = h.getFullYear();
+  rAgenda();
+}
+
+function setAgendaNivel(n) {
+  AGENDA_NIVEL = n;
+  rAgenda();
+}
+
+// ─── UTILIDADES ───────────────────────────────────────
+function isoFecha(a, m, d) {
+  return `${a}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+function formatFechaLatam(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+// ─── ESTILOS ──────────────────────────────────────────
+function inyectarEstilosAgenda() {
+  if (document.getElementById('agenda-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'agenda-styles';
+  st.textContent = `
+    .nivel-tabs-ag{display:flex;gap:6px;flex-wrap:wrap;}
+    .nivel-tab-ag{padding:6px 14px;border-radius:20px;border:1px solid var(--brd);cursor:pointer;font-size:11px;background:var(--surf2);color:var(--txt2);font-family:inherit;transition:all .15s;}
+    .nivel-tab-ag:hover{opacity:.85;}
+
+    .cal-header-ag{display:grid;grid-template-columns:repeat(7,1fr);background:var(--surf2);border-bottom:1px solid var(--brd);}
+    .cal-th-ag{padding:8px 4px;text-align:center;font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;}
+    .cal-body-ag{display:grid;grid-template-columns:repeat(7,1fr);}
+    .cal-cell-ag{min-height:88px;padding:4px;border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+    .cal-cell-ag.empty{background:var(--surf2);opacity:.5;}
+    .cal-cell-ag.hoy{background:#f0f9f4;}
+    .dark .cal-cell-ag.hoy{background:#0f2a1a;}
+    .cal-dia-num-ag{font-size:11px;font-weight:600;margin-bottom:3px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;}
+    .cal-dia-num-ag.hoy{background:var(--verde);color:#fff;}
+    .cal-ev-chip-ag{font-size:9px;padding:2px 5px;border-radius:3px;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .1s;font-weight:500;}
+    .cal-ev-chip-ag:hover{opacity:.75;}
+
+    .form-grid-2-ag{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    @media(max-width:600px){.form-grid-2-ag{grid-template-columns:1fr;}}
+
+    .sel-estilizado{width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:9px 12px;background:var(--surf);color:var(--txt);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%235d6d7e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;}
+    .sel-estilizado:focus{outline:none;border-color:var(--verde);}
+    .input-fecha{width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:9px 12px;background:var(--surf);color:var(--txt);font-family:'DM Sans',sans-serif;font-size:12px;}
+    .input-fecha:focus{outline:none;border-color:var(--verde);}
+
+    .usr-search-wrap{position:relative;}
+    .usr-search-inp{width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:9px 12px;background:var(--surf);color:var(--txt);font-family:'DM Sans',sans-serif;font-size:12px;}
+    .usr-search-inp:focus{outline:none;border-color:var(--verde);}
+    .usr-dropdown{position:absolute;z-index:100;background:var(--surf);border:1px solid var(--brd2);border-radius:var(--rad);box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:200px;overflow-y:auto;width:100%;top:calc(100% + 4px);left:0;}
+    .usr-opt{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:11px;transition:background .1s;}
+    .usr-opt:hover{background:var(--surf2);}
+    .usr-opt.sel{background:var(--verde-l);color:var(--verde);}
+
+    .chips-sel{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;min-height:24px;}
+    .chip-sel{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:var(--azul-l);color:var(--azul);font-size:11px;border:1px solid var(--azul);}
+    .chip-av-sm{width:16px;height:16px;border-radius:50%;background:var(--verde);color:#fff;font-size:8px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+    @media(max-width:768px){
+      .cal-cell-ag{min-height:50px;}
+      .cal-ev-chip-ag{display:none;}
+    }
+  `;
+  document.head.appendChild(st);
+}
