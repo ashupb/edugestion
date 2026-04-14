@@ -18,6 +18,7 @@ const PAGE_LABELS = {
   eoe:       'Equipo de orientación',
   admin:     'Datos institucionales',
   agenda:    'Agenda institucional',
+  notas:     'Calificaciones',
 };
 
 // ── ARRANQUE ─────────────────────────────────────────
@@ -75,6 +76,7 @@ async function goPage(id) {
     eoe:       rEOE,
     admin:     rAdmin,
     agenda:    rAgenda,
+    notas:     rNotas,
   };
   if (renderers[id]) await renderers[id]();
 
