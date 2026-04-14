@@ -101,7 +101,19 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
       sb.from('config_calificaciones').select('*')
         .eq('usuario_id', USUARIO_ACTUAL.id)
         .eq('materia_id', materiaId).eq('curso_id', cursoId).maybeSingle(),
+        <div class="acc" style="margin-top:14px">
+            <button class="btn-p" onclick="cargarNotasInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}')">
+                📝 Cargar notas
+            </button>
+            <button class="btn-s" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">
+                + Nueva instancia
+            </button>
+            <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">
+                ⚙️ Configurar
+            </button>
+        </div>
     ]);
+
 
     const alumnos    = alumnosRes.data    || [];
     const instancias = instanciasRes.data || [];
@@ -317,7 +329,8 @@ window.checkRecup = (sel) => {
 async function guardarInstancia(cursoId, materiaId, periodoId) {
   const nombre  = document.getElementById('inst-nombre')?.value?.trim();
   const tipoId  = document.getElementById('inst-tipo')?.value;
-  const fecha   = document.getElementById('inst-fecha')?.value;
+  const fechaRaw = document.getElementById('inst-fecha')?.value;
+  const fecha    = fechaRaw;
   const origId  = document.getElementById('inst-orig')?.value || null;
   const desc    = document.getElementById('inst-desc')?.value || null;
 
@@ -356,6 +369,13 @@ async function guardarInstancia(cursoId, materiaId, periodoId) {
 
   document.getElementById('modal-instancia')?.remove();
   window.cambioPeriodo?.(periodoId);
+
+  // Normalizar fecha
+    let fechaNorm = fecha;
+    if (fecha.includes('/')) {
+    const [m,d,y] = fecha.split('/');
+    fechaNorm = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    }
 }
 
 // ─── EDITAR NOTA ──────────────────────────────────────
@@ -872,6 +892,7 @@ function inyectarEstilosNotas() {
     .nota-warn { background:var(--amb-l);   color:var(--ambar); }
     .nota-risk { background:var(--rojo-l);  color:var(--rojo);  }
     .nota-nd   { background:var(--gris-l);  color:var(--gris);  }
+    .curso-card-asist { cursor: pointer; }
 
     @media(max-width:768px){
       .grilla-notas{font-size:10px;}

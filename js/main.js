@@ -179,6 +179,11 @@ function formatFecha(iso) {
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
 }
+function formatFechaLatam(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
 function formatFechaCorta(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -275,6 +280,7 @@ const BOTTOM_NAV_ITEMS = {
     { id:'dash',    icon:'🏠', label:'Inicio' },
     { id:'agenda',  icon:'📅', label:'Agenda' },
     { id:'asist',   icon:'✅', label:'Lista' },
+    { id:'notas', icon:'📊', label:'Notas' },
     { id:'leg',     icon:'🗂️', label:'Legajos' },
     { id:'prob',    icon:'⚠️', label:'Reportar' },
   ],
