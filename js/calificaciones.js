@@ -99,19 +99,8 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
         .eq('curso_id', cursoId).eq('materia_id', materiaId)
         .eq('periodo_id', PERIODO_SEL),
       sb.from('config_calificaciones').select('*')
-        .eq('usuario_id', USUARIO_ACTUAL.id)
-        .eq('materia_id', materiaId).eq('curso_id', cursoId).maybeSingle(),
-        <div class="acc" style="margin-top:14px">
-            <button class="btn-p" onclick="cargarNotasInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}')">
-                📝 Cargar notas
-            </button>
-            <button class="btn-s" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">
-                + Nueva instancia
-            </button>
-            <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">
-                ⚙️ Configurar
-            </button>
-        </div>
+      .eq('usuario_id', USUARIO_ACTUAL.id)
+      .eq('materia_id', materiaId).eq('curso_id', cursoId).maybeSingle(),
     ]);
 
 
@@ -164,6 +153,18 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
             ${p.nombre}
           </button>`).join('')}
       </div>
+
+        <div class="acc" style="margin-top:14px">
+            <button class="btn-p" onclick="cargarNotasInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}')">
+                📝 Cargar notas
+            </button>
+            <button class="btn-s" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">
+                + Nueva instancia
+            </button>
+            <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">
+                ⚙️ Configurar
+            </button>
+        </div>
 
       <!-- Stats -->
       ${instancias.length ? `
@@ -234,6 +235,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
         <button class="btn-p" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">+ Nueva instancia evaluativa</button>
         <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">⚙️ Configurar</button>
       </div>`;
+    
   };
 
   // Función para cambiar período sin recargar toda la página

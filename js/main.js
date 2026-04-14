@@ -72,11 +72,11 @@ async function goPage(id) {
     prob:      rProb,
     obj:       rObj,
     asist:     rAsist,
+    notas:     rNotas,
     leg:       rLeg,
     eoe:       rEOE,
     admin:     rAdmin,
-    agenda:    rAgenda,
-    notas:     rNotas,
+    agenda:    rAgenda, 
   };
   if (renderers[id]) await renderers[id]();
 

@@ -570,7 +570,7 @@ async function irListaDocente() {
   await mostrarListaCurso(cursoId, nivel, fecha, true, materiaId, HORA_SEL);
 }
 
-  c.innerHTML = `
+  document.getElementById('page-asist').innerHTML = `
     <div class="pg-t">Asistencia</div>
     <div class="pg-s">${formatFechaLatam(hoy)}</div>
 
