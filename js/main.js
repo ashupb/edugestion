@@ -186,8 +186,8 @@ function formatFechaLatam(iso) {
 }
 function formatFechaCorta(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('es-AR', { day:'2-digit', month:'short' });
+  const [y, m, d] = iso.split('-');
+  return new Date(+y, +m - 1, +d).toLocaleDateString('es-AR', { day:'2-digit', month:'short' });
 }
 function tiempoDesde(iso) {
   if (!iso) return '';

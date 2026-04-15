@@ -164,17 +164,35 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
       </div>
 
       <!-- Botones acción -->
-      <div class="acc" style="margin-bottom:12px">
-        <button class="btn-p" onclick="abrirCargaBulk('${cursoId}','${materiaId}','${PERIODO_SEL}')">
-          📝 Cargar notas
-        </button>
-        <button class="btn-s" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">
-          + Nueva instancia
-        </button>
-        <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">
-          ⚙️ Configurar
-        </button>
-      </div>
+      ${(() => {
+        const p = periodosCurso.find(p => p.id === PERIODO_SEL);
+        if (!p) return '';
+        if (p.validado_at) return `
+          <div style="background:var(--azul-l);border-left:3px solid var(--azul);border-radius:var(--rad);
+            padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--azul)">
+            🔒 <strong>${p.nombre}</strong> — validado y bloqueado por el preceptor
+          </div>`;
+        if (p.cerrado) return `
+          <div style="background:var(--amb-l);border-left:3px solid var(--ambar);border-radius:var(--rad);
+            padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ambar)">
+            ⏳ <strong>${p.nombre}</strong> cerrado — pendiente de validación del preceptor
+          </div>`;
+        return `
+          <div class="acc" style="margin-bottom:12px">
+            <button class="btn-p" onclick="abrirCargaBulk('${cursoId}','${materiaId}','${PERIODO_SEL}')">
+              📝 Cargar notas
+            </button>
+            <button class="btn-s" onclick="crearInstancia('${cursoId}','${materiaId}','${PERIODO_SEL}','${nivel}')">
+              + Nueva instancia
+            </button>
+            <button class="btn-s" onclick="abrirConfigCalif('${cursoId}','${materiaId}',${notaMin},${recReempl})">
+              ⚙️ Configurar
+            </button>
+            <button class="btn-d" onclick="cerrarPeriodo('${cursoId}','${materiaId}','${PERIODO_SEL}','${p.nombre}')">
+              🔒 Cerrar período
+            </button>
+          </div>`;
+      })()}
       <!-- Grilla -->
       ${!instancias.length
         ? `<div class="empty-state">Sin instancias evaluativas.<br>Creá una con el botón "Nueva instancia".</div>`
@@ -185,8 +203,11 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
                 <th style="text-align:left;min-width:140px">Alumno</th>
                 ${instancias.map(inst => `
                   <th class="${inst.tipos_evaluacion?.es_recuperatorio ? 'th-recup' : ''}"
-                    style="width:64px;min-width:64px;max-width:64px">
-                    <div style="font-size:9px;width:56px;white-space:normal;line-height:1.3;overflow:hidden;word-break:break-word;margin:0 auto">
+                    title="${inst.tipos_evaluacion?.nombre || ''}"
+                    style="width:68px;min-width:68px;max-width:68px">
+                    <div style="font-size:9px;width:60px;line-height:1.3;overflow:hidden;
+                      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+                      word-break:normal;overflow-wrap:normal;margin:0 auto">
                       ${inst.tipos_evaluacion?.nombre || '—'}
                     </div>
                     <div style="font-size:9px;opacity:.6">${formatFechaCorta(inst.fecha)}</div>
@@ -638,8 +659,14 @@ async function rNotasDirectivo() {
   const rol    = USUARIO_ACTUAL.rol;
   const nivel  = USUARIO_ACTUAL.nivel;
 
-  const { data: cursos } = await sb.from('cursos')
+  const cursosQuery = sb.from('cursos')
     .select('*').eq('institucion_id', instId).order('nivel').order('nombre');
+
+  const periodosPendQuery = (rol === 'preceptor')
+    ? sb.from('periodos_evaluativos').select('*').eq('institucion_id', instId).eq('cerrado', true).is('validado_at', null)
+    : Promise.resolve({ data: [] });
+
+  const [{ data: cursos }, { data: periodosPend }] = await Promise.all([cursosQuery, periodosPendQuery]);
 
   let filtrados = cursos || [];
   if (nivel) filtrados = filtrados.filter(cu => cu.nivel === nivel);
@@ -647,9 +674,29 @@ async function rNotasDirectivo() {
   const niveles = ['inicial','primario','secundario'];
   const colores = { inicial:'#1a7a4a', primario:'#1a5276', secundario:'#6c3483' };
 
+  const validacionBanner = (rol === 'preceptor' && periodosPend?.length) ? `
+    <div style="background:var(--amb-l);border-left:4px solid var(--ambar);border-radius:var(--rad);
+      padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--ambar);margin-bottom:8px">
+        ⏳ Períodos pendientes de validación
+      </div>
+      ${periodosPend.map(p => `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div>
+            <div style="font-size:11px;font-weight:600">${p.nombre}</div>
+            <div style="font-size:10px;color:var(--txt2)">${p.nivel} · Cerrado por docente</div>
+          </div>
+          <button class="btn-p" style="font-size:10px;padding:5px 12px;background:var(--ambar)"
+            onclick="validarCierrePeriodo('${p.id}','${p.nombre}')">
+            ✓ Validar
+          </button>
+        </div>`).join('')}
+    </div>` : '';
+
   c.innerHTML = `
     <div class="pg-t">Calificaciones</div>
-    <div class="pg-s">Vista institucional · Solo lectura</div>
+    <div class="pg-s">${rol === 'preceptor' ? 'Preceptoría' : 'Vista institucional'} · Solo lectura</div>
+    ${validacionBanner}
     ${niveles.map(n => {
       const cs = filtrados.filter(cu => cu.nivel === n);
       if (!cs.length) return '';
