@@ -175,7 +175,10 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
           ⚙️ Configurar
         </button>
       </div>
-
+        <div class="periodo-tabs">...</div>
+        ${estadoPeriodoHTML}
+        <div class="metrics m3">...</div>
+        ${botonesHTML}
       <!-- Grilla -->
       ${!instancias.length
         ? `<div class="empty-state">Sin instancias evaluativas.<br>Creá una con el botón "Nueva instancia".</div>`
@@ -411,15 +414,23 @@ async function guardarBulk(cursoId, materiaId, periodoId) {
 
 // ─── CREAR INSTANCIA EVALUATIVA ───────────────────────
 async function crearInstancia(cursoId, materiaId, periodoId, nivel) {
+  // Recargar tipos si están vacíos
+  if (!TIPOS_EVAL.length) {
+    const { data } = await sb.from('tipos_evaluacion')
+      .select('*').eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .eq('activo', true).order('nombre');
+    TIPOS_EVAL = data || [];
+  }
+
+  const hoy = new Date().toISOString().split('T')[0];
+
   const { data: instExist } = await sb.from('instancias_evaluativas')
     .select('*, tipos_evaluacion(nombre)')
     .eq('curso_id', cursoId)
-    .eq('periodo_id', periodoId).order('fecha')
-    .eq('creado_por', USUARIO_ACTUAL.id) 
-    .gte('fecha', hoy)                     
+    .eq('periodo_id', periodoId)
+    .eq('creado_por', USUARIO_ACTUAL.id)
+    .gte('fecha', hoy)
     .order('fecha');
-
-  const hoy = new Date().toISOString().split('T')[0];
 
   document.getElementById('modal-instancia')?.remove();
   const modal = document.createElement('div');
@@ -460,12 +471,12 @@ async function crearInstancia(cursoId, materiaId, periodoId, nivel) {
 
       ${instExist?.length ? `
         <div style="background:var(--amb-l);border-radius:var(--rad);padding:8px 10px;font-size:10px;color:var(--ambar);margin-bottom:10px">
-          ⚠️ Ya programado en este período:
+          ⚠️ Ya tenés programado:
           ${instExist.map(i => `<div>· ${i.tipos_evaluacion?.nombre} · ${formatFechaLatam(i.fecha)}</div>`).join('')}
         </div>` : ''}
 
       <div class="sec-lb">Descripción (opcional)</div>
-      <textarea id="inst-desc" rows="2" placeholder="Temas evaluados, materiales..." style="margin-bottom:14px"></textarea>
+      <textarea id="inst-desc" rows="2" placeholder="Temas, materiales..." style="margin-bottom:14px"></textarea>
 
       <div class="acc">
         <button class="btn-p" onclick="guardarInstancia('${cursoId}','${materiaId}','${periodoId}')">Crear</button>
@@ -622,6 +633,26 @@ async function verCalifCurso(cursoId, nivel) {
     const alumnos  = alumnosRes.data || [];
     const materias = materiasRes.data || [];
 
+    // Períodos pendientes de validación — AGREGÁ ESTO ACÁ
+  const { data: periodosPendientes } = await sb.from('periodos_evaluativos')
+    .select('*')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('cerrado', true)
+    .is('validado_at', null);
+
+  const validacionPendHTML = (USUARIO_ACTUAL.rol === 'preceptor' && periodosPendientes?.length) ? `
+    <div class="alr" style="margin-bottom:12px">
+      <div class="alr-t">⏳ Períodos pendientes de validación</div>
+      ${periodosPendientes.map(p => `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+          <span style="font-size:11px">${p.nombre} · ${p.nivel}</span>
+          <button class="btn-p" style="font-size:10px"
+            onclick="validarCierrePeriodo('${p.id}','${p.nombre}')">
+            ✓ Validar
+          </button>
+        </div>`).join('')}
+    </div>` : '';
+
     // Calcular promedios por alumno por materia
     const promediosMap = {};
     for (const m of materias) {
@@ -647,7 +678,7 @@ async function verCalifCurso(cursoId, nivel) {
             ${p.nombre}
             </button>`).join('')}
         </div>
-
+      ${validacionPendHTML}
       ${!materias.length ? '<div class="empty-state">Sin materias configuradas</div>' : `
       <div style="overflow-x:auto">
         <table class="grilla-notas">
@@ -901,4 +932,48 @@ function inyectarEstilosNotas() {
     }
   `;
   document.head.appendChild(st);
+}
+
+// ─── CIERRE DE PERÍODO ────────────────────────────────
+
+async function cerrarPeriodo(cursoId, materiaId, periodoId, nombrePeriodo) {
+  if (!confirm(`¿Cerrás el ${nombrePeriodo}? El preceptor deberá validarlo para que quede bloqueado.`)) return;
+
+  const { error } = await sb.from('periodos_evaluativos')
+    .update({
+      cerrado:     true,
+      cerrado_por: USUARIO_ACTUAL.id,
+      cerrado_at:  new Date().toISOString(),
+    }).eq('id', periodoId);
+
+  if (error) { alert('Error: ' + error.message); return; }
+  window.cambioPeriodoDoc?.(periodoId);
+}
+
+async function validarCierrePeriodo(periodoId, nombrePeriodo) {
+  if (!confirm(`¿Validás el cierre del ${nombrePeriodo}? Las notas quedarán bloqueadas.`)) return;
+
+  const { error } = await sb.from('periodos_evaluativos')
+    .update({
+      validado_por: USUARIO_ACTUAL.id,
+      validado_at:  new Date().toISOString(),
+    }).eq('id', periodoId);
+
+  if (error) { alert('Error: ' + error.message); return; }
+  alert('✅ Período validado y bloqueado.');
+  rNotas();
+}
+
+async function reabrirPeriodo(periodoId, nombrePeriodo) {
+  if (!confirm(`¿Reabrís el ${nombrePeriodo}? El docente podrá editar las notas nuevamente.`)) return;
+
+  await sb.from('periodos_evaluativos').update({
+    cerrado:      false,
+    cerrado_por:  null,
+    cerrado_at:   null,
+    validado_por: null,
+    validado_at:  null,
+  }).eq('id', periodoId);
+
+  rNotas();
 }

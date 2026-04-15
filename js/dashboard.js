@@ -395,6 +395,25 @@ async function rDashPreceptor() {
     <div class="pg-t">Bienvenido/a, ${apellido} 👋</div>
     <div class="pg-s">${new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'})}</div>
 
+    ${alertasAlumnos.length ? `
+    <div class="sec-lb">⚠️ Alertas de asistencia</div>
+    ${alertasAlumnos.map(a => {
+        const al  = a.alumnos;
+        const cu  = al?.cursos;
+        const labels = ['','⚠️ 1° aviso','⚠️ 2° aviso','🔴 3° aviso','🚨 Riesgo'];
+        const color  = a.tipo_alerta >= 3 ? 'var(--rojo)' : 'var(--ambar)';
+        return `
+          <div class="card" style="padding:10px 14px;margin-bottom:6px;border-left:3px solid ${color};
+            display:flex;align-items:center;justify-content:space-between;cursor:pointer"
+            onclick="goPage('asist')">
+            <div>
+              <div style="font-size:12px;font-weight:600">${al?.apellido}, ${al?.nombre}</div>
+              <div style="font-size:10px;color:var(--txt2)">${cu?.nombre}${cu?.division} · ${a.total_faltas} faltas</div>
+            </div>
+            <span class="tag ${a.tipo_alerta >= 3 ? 'tr' : 'ta'}">${labels[a.tipo_alerta]}</span>
+          </div>`;
+      }).join('')}` : ''}
+
     <!-- Placa de listas -->
     <div style="background:${todasListas?'var(--verde-l)':'var(--rojo-l)'};border-left:4px solid ${todasListas?'var(--verde)':'var(--rojo)'};border-radius:var(--rad);padding:12px 14px;margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:${todasListas?'var(--verde)':'var(--rojo)'}">
