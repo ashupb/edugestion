@@ -184,8 +184,9 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
               <tr>
                 <th style="text-align:left;min-width:140px">Alumno</th>
                 ${instancias.map(inst => `
-                  <th class="${inst.tipos_evaluacion?.es_recuperatorio ? 'th-recup' : ''}">
-                    <div style="font-size:9px;max-width:60px;white-space:normal;line-height:1.3">
+                  <th class="${inst.tipos_evaluacion?.es_recuperatorio ? 'th-recup' : ''}"
+                    style="width:64px;min-width:64px;max-width:64px">
+                    <div style="font-size:9px;width:56px;white-space:normal;line-height:1.3;overflow:hidden;word-break:break-word;margin:0 auto">
                       ${inst.tipos_evaluacion?.nombre || '—'}
                     </div>
                     <div style="font-size:9px;opacity:.6">${formatFechaCorta(inst.fecha)}</div>
@@ -431,52 +432,110 @@ async function crearInstancia(cursoId, materiaId, periodoId, nivel) {
   document.getElementById('modal-instancia')?.remove();
   const modal = document.createElement('div');
   modal.id    = 'modal-instancia';
-  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px`;
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px`;
   modal.innerHTML = `
-    <div style="background:var(--surf);border-radius:var(--rad-lg);padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto">
-      <div style="font-size:14px;font-weight:700;margin-bottom:14px">Nueva instancia evaluativa</div>
+    <div style="background:var(--surf);border-radius:16px;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18)">
 
-      <div class="sec-lb">Nombre</div>
-      <input type="text" id="inst-nombre" placeholder="Ej: 2° Parcial — Unidad 3" style="margin-bottom:10px">
-
-      <div class="sec-lb">Tipo</div>
-      <select id="inst-tipo" class="sel-estilizado" style="margin-bottom:10px" onchange="checkRecupModal(this)">
-        <option value="">— Elegí tipo —</option>
-        <optgroup label="Evaluaciones">
-          ${TIPOS_EVAL.filter(t => !t.es_recuperatorio).map(t =>
-            `<option value="${t.id}" data-recup="false">${t.nombre}</option>`).join('')}
-        </optgroup>
-        <optgroup label="Recuperatorios">
-          ${TIPOS_EVAL.filter(t => t.es_recuperatorio).map(t =>
-            `<option value="${t.id}" data-recup="true">${t.nombre}</option>`).join('')}
-        </optgroup>
-      </select>
-
-      <div id="recup-orig-sel" style="display:none;margin-bottom:10px">
-        <div class="sec-lb">Recuperatorio de</div>
-        <select id="inst-orig" class="sel-estilizado">
-          <option value="">— Elegí instancia original —</option>
-          ${(instExist || []).filter(i => !i.tipos_evaluacion?.es_recuperatorio).map(i =>
-            `<option value="${i.id}">${i.tipos_evaluacion?.nombre} · ${formatFechaLatam(i.fecha)}</option>`
-          ).join('')}
-        </select>
+      <!-- Header -->
+      <div style="padding:20px 22px 16px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:16px;font-weight:700;font-family:'Lora',serif">Nueva instancia</div>
+          <div style="font-size:11px;color:var(--txt2);margin-top:2px">Evaluación · ${new Date().toLocaleDateString('es-AR',{month:'long',year:'numeric'})}</div>
+        </div>
+        <button onclick="document.getElementById('modal-instancia').remove()"
+          style="background:var(--surf2);border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:16px;color:var(--txt2);display:flex;align-items:center;justify-content:center">✕</button>
       </div>
 
-      <div class="sec-lb">Fecha</div>
-      <input type="date" id="inst-fecha" class="input-fecha" value="${hoy}" style="margin-bottom:10px">
+      <!-- Body -->
+      <div style="padding:20px 22px">
 
-      ${instExist?.length ? `
-        <div style="background:var(--amb-l);border-radius:var(--rad);padding:8px 10px;font-size:10px;color:var(--ambar);margin-bottom:10px">
-          ⚠️ Ya tenés programado:
-          ${instExist.map(i => `<div>· ${i.tipos_evaluacion?.nombre} · ${formatFechaLatam(i.fecha)}</div>`).join('')}
+        <!-- Nombre -->
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Nombre</label>
+          <input type="text" id="inst-nombre" placeholder="Ej: 2° Parcial — Unidad 3"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:13px;
+              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;
+              transition:border-color .15s;outline:none"
+            onfocus="this.style.borderColor='var(--verde)'" onblur="this.style.borderColor='var(--brd)'">
+        </div>
+
+        <!-- Tipo -->
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Tipo de evaluación</label>
+          <select id="inst-tipo" onchange="checkRecupModal(this)"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:13px;
+              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;cursor:pointer;
+              appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><path fill=%22%23888%22 d=%22M8 10L3 5h10z%22/></svg>');
+              background-repeat:no-repeat;background-position:right 12px center;background-size:12px">
+            <option value="">— Elegí tipo —</option>
+            <optgroup label="Evaluaciones">
+              ${TIPOS_EVAL.filter(t => !t.es_recuperatorio).map(t =>
+                `<option value="${t.id}" data-recup="false">${t.nombre}</option>`).join('')}
+            </optgroup>
+            <optgroup label="Recuperatorios">
+              ${TIPOS_EVAL.filter(t => t.es_recuperatorio).map(t =>
+                `<option value="${t.id}" data-recup="true">${t.nombre}</option>`).join('')}
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- Recuperatorio de -->
+        <div id="recup-orig-sel" style="display:none;margin-bottom:16px">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Recuperatorio de</label>
+          <select id="inst-orig"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:13px;
+              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;cursor:pointer">
+            <option value="">— Elegí instancia original —</option>
+            ${(instExist || []).filter(i => !i.tipos_evaluacion?.es_recuperatorio).map(i =>
+              `<option value="${i.id}">${i.tipos_evaluacion?.nombre} · ${formatFechaLatam(i.fecha)}</option>`
+            ).join('')}
+          </select>
+        </div>
+
+        <!-- Fecha -->
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Fecha</label>
+          <input type="date" id="inst-fecha" value="${hoy}"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:13px;
+              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;
+              transition:border-color .15s;outline:none"
+            onfocus="this.style.borderColor='var(--verde)'" onblur="this.style.borderColor='var(--brd)'">
+        </div>
+
+        ${instExist?.length ? `
+        <div style="background:var(--amb-l);border-radius:10px;padding:10px 14px;margin-bottom:16px;border-left:3px solid var(--ambar)">
+          <div style="font-size:10px;font-weight:700;color:var(--ambar);margin-bottom:6px">Ya tenés programado</div>
+          ${instExist.map(i => `
+            <div style="font-size:11px;color:var(--txt);display:flex;align-items:center;gap:6px;margin-bottom:3px">
+              <span style="color:var(--ambar)">·</span> ${i.tipos_evaluacion?.nombre} · ${formatFechaLatam(i.fecha)}
+            </div>`).join('')}
         </div>` : ''}
 
-      <div class="sec-lb">Descripción (opcional)</div>
-      <textarea id="inst-desc" rows="2" placeholder="Temas, materiales..." style="margin-bottom:14px"></textarea>
+        <!-- Descripción -->
+        <div style="margin-bottom:20px">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Descripción <span style="font-weight:400;text-transform:none">(opcional)</span></label>
+          <textarea id="inst-desc" rows="2" placeholder="Temas, materiales, unidades..."
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:12px;
+              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;resize:vertical;
+              transition:border-color .15s;outline:none"
+            onfocus="this.style.borderColor='var(--verde)'" onblur="this.style.borderColor='var(--brd)'"></textarea>
+        </div>
 
-      <div class="acc">
-        <button class="btn-p" onclick="guardarInstancia('${cursoId}','${materiaId}','${periodoId}')">Crear</button>
-        <button class="btn-s" onclick="document.getElementById('modal-instancia').remove()">Cancelar</button>
+        <!-- Acciones -->
+        <div style="display:flex;gap:8px">
+          <button onclick="guardarInstancia('${cursoId}','${materiaId}','${periodoId}')"
+            style="flex:1;padding:12px;background:var(--verde);color:#fff;border:none;border-radius:10px;
+              font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .15s"
+            onmouseover="this.style.opacity='.88'" onmouseout="this.style.opacity='1'">
+            Crear instancia
+          </button>
+          <button onclick="document.getElementById('modal-instancia').remove()"
+            style="padding:12px 18px;background:var(--surf2);color:var(--txt2);border:1.5px solid var(--brd);
+              border-radius:10px;font-size:13px;cursor:pointer;font-family:inherit">
+            Cancelar
+          </button>
+        </div>
+
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -901,9 +960,9 @@ function inyectarEstilosNotas() {
   const st = document.createElement('style');
   st.id = 'notas-styles';
   st.textContent = `
-    .grilla-notas { width:100%; border-collapse:collapse; font-size:11px; }
-    .grilla-notas th { padding:6px 4px; text-align:center; background:var(--surf2); border-bottom:2px solid var(--brd); font-weight:700; color:var(--txt2); font-size:10px; }
-    .grilla-notas td { padding:5px 4px; text-align:center; border-bottom:1px solid var(--brd); }
+    .grilla-notas { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
+    .grilla-notas th { padding:6px 4px; text-align:center; background:var(--surf2); border-bottom:2px solid var(--brd); font-weight:700; color:var(--txt2); font-size:10px; overflow:hidden; }
+    .grilla-notas td { padding:5px 4px; text-align:center; border-bottom:1px solid var(--brd); overflow:hidden; }
     .grilla-notas tr:hover td { background:var(--surf2); }
     .grilla-notas .th-recup { background:var(--azul-l); color:var(--azul); }
     .nota-cell { display:inline-block; min-width:26px; padding:2px 4px; border-radius:5px; font-size:11px; font-weight:700; text-align:center; }
