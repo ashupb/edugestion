@@ -1,0 +1,731 @@
+// =====================================================
+// LEGAJOS.JS — Módulo completo de legajos de alumnos
+// =====================================================
+
+let _legVista       = 'cursos';  // 'cursos' | 'alumnos' | 'legajo'
+let _legCursoSel    = null;
+let _legAlumnoSel   = null;
+let _legTab         = 0;
+let _legCursosCache = [];
+let _legAlumnosCache= [];
+let _legSemMap      = {};        // { alumnoId: 'verde'|'amarillo'|'rojo' }
+
+const NIVEL_COL = {
+  inicial:    { bg:'var(--dor-l)',   fg:'var(--dorado)', txt:'Inicial' },
+  primaria:   { bg:'var(--verde-l)', fg:'var(--verde)',  txt:'Primaria' },
+  secundaria: { bg:'var(--azul-l)',  fg:'var(--azul)',   txt:'Secundaria' },
+  terciaria:  { bg:'var(--rojo-l)',  fg:'var(--rojo)',   txt:'Terciaria' },
+};
+function nivCol(nivel) {
+  return NIVEL_COL[nivel?.toLowerCase()] || { bg:'var(--gris-l)', fg:'var(--gris)', txt: nivel || '—' };
+}
+
+function legPermisos() {
+  const r = USUARIO_ACTUAL?.rol;
+  return {
+    editarDatos:          ['director_general','directivo_nivel','admin'].includes(r),
+    editarContactos:      ['director_general','directivo_nivel','eoe','admin','preceptor'].includes(r),
+    verEOE:               ['eoe','director_general','directivo_nivel','admin'].includes(r),
+    agregarEOE:           r === 'eoe',
+    agregarObservaciones: ['preceptor','docente','eoe','director_general','directivo_nivel','admin'].includes(r),
+    verObsPrivadas:       ['eoe','director_general','directivo_nivel','admin'].includes(r),
+    marcarPrivada:        ['eoe','director_general','directivo_nivel','admin'].includes(r),
+    subirDocs:            ['director_general','directivo_nivel','admin'].includes(r),
+  };
+}
+
+// ── ENTRADA PRINCIPAL ─────────────────────────────────
+async function rLeg() {
+  showLoading('leg');
+  inyectarEstilosLeg();
+  try {
+    const { data, error } = await sb.from('cursos')
+      .select('id,nombre,division,nivel,anio')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .order('nivel').order('anio').order('division');
+    if (error) throw error;
+    _legCursosCache = data || [];
+    _legVista = 'cursos';
+    _legCursoSel = null;
+    _legAlumnoSel = null;
+    _renderLegCursos();
+  } catch(e) { showError('leg', 'Error cargando cursos: ' + e.message); }
+}
+
+function _renderLegCursos() {
+  const c = document.getElementById('page-leg');
+
+  const porNivel = {};
+  _legCursosCache.forEach(cur => {
+    const niv = cur.nivel || 'sin nivel';
+    if (!porNivel[niv]) porNivel[niv] = [];
+    porNivel[niv].push(cur);
+  });
+
+  const html = Object.entries(porNivel).map(([nivel, lista]) => {
+    const nc = nivCol(nivel);
+    const cards = lista.map(cur => `
+      <div class="leg-curso-card" onclick="abrirCursoLeg('${cur.id}')">
+        <div class="leg-curso-badge" style="background:${nc.bg};color:${nc.fg}">
+          ${cur.anio || ''}°${cur.division || ''}
+        </div>
+        <div class="leg-curso-nombre">${cur.nombre}</div>
+        <div class="leg-curso-arrow">›</div>
+      </div>`).join('');
+    return `
+      <div style="margin-bottom:18px">
+        <div class="leg-nivel-header" style="color:${nc.fg}">${nc.txt}</div>
+        <div class="leg-cursos-grid">${cards}</div>
+      </div>`;
+  }).join('') || '<div class="empty-state">▤<br>Sin cursos registrados</div>';
+
+  c.innerHTML = `
+    <div class="pg-t">Legajos</div>
+    <div class="pg-s">Seleccioná un curso · ${INSTITUCION_ACTUAL?.nombre || ''}</div>
+    <div style="margin-top:16px">${html}</div>`;
+}
+
+// ── LISTA DE ALUMNOS POR CURSO ────────────────────────
+async function abrirCursoLeg(cursoId) {
+  const cur = _legCursosCache.find(c => c.id === cursoId);
+  if (!cur) return;
+  _legCursoSel = cur;
+  _legVista = 'alumnos';
+
+  const c = document.getElementById('page-leg');
+  c.innerHTML = '<div class="loading-state"><div class="spinner"></div><div>Cargando alumnos...</div></div>';
+
+  try {
+    const { data, error } = await sb.from('alumnos')
+      .select('id,nombre,apellido,dni,fecha_nacimiento,activo')
+      .eq('curso_id', cursoId)
+      .eq('activo', true)
+      .order('apellido');
+    if (error) throw error;
+    _legAlumnosCache = data || [];
+
+    await _cargarSemaforos(_legAlumnosCache.map(a => a.id));
+    _renderLegAlumnos();
+  } catch(e) { showError('leg', 'Error: ' + e.message); }
+}
+
+async function _cargarSemaforos(ids) {
+  _legSemMap = {};
+  if (!ids.length) return;
+  try {
+    const { data } = await sb.from('problematicas')
+      .select('alumno_id,urgencia')
+      .in('alumno_id', ids)
+      .in('estado', ['abierta','en_seguimiento']);
+    (data || []).forEach(p => {
+      const actual = _legSemMap[p.alumno_id];
+      if (p.urgencia === 'alta') {
+        _legSemMap[p.alumno_id] = 'rojo';
+      } else if (p.urgencia === 'media' && actual !== 'rojo') {
+        _legSemMap[p.alumno_id] = 'amarillo';
+      } else if (!actual) {
+        _legSemMap[p.alumno_id] = 'verde';
+      }
+    });
+  } catch(e) { /* sin problematicas, todo verde */ }
+  ids.forEach(id => { if (!_legSemMap[id]) _legSemMap[id] = 'verde'; });
+}
+
+function _semClr(sem) {
+  return sem === 'rojo' ? 'var(--rojo)' : sem === 'amarillo' ? 'var(--ambar)' : 'var(--verde)';
+}
+
+function _renderLegAlumnos() {
+  const c  = document.getElementById('page-leg');
+  const nc = nivCol(_legCursoSel?.nivel);
+  const alumnos = _legAlumnosCache;
+  const rojos    = alumnos.filter(a => _legSemMap[a.id] === 'rojo').length;
+  const amarillos= alumnos.filter(a => _legSemMap[a.id] === 'amarillo').length;
+
+  const rows = alumnos.map(a => {
+    const sem = _legSemMap[a.id] || 'verde';
+    const ini = (a.apellido?.[0] || '') + (a.nombre?.[0] || '');
+    return `
+      <div class="leg-alumno-row" onclick="abrirLegajoAlumno('${a.id}')">
+        <div class="av av32" style="background:${nc.bg};color:${nc.fg}">${ini}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500">${a.apellido}, ${a.nombre}</div>
+          ${a.dni ? `<div style="font-size:10px;color:var(--txt2)">DNI: ${a.dni}</div>` : ''}
+        </div>
+        <div class="leg-semaforo" style="background:${_semClr(sem)}" title="Semáforo: ${sem}"></div>
+        <span style="font-size:13px;color:var(--txt2)">›</span>
+      </div>`;
+  }).join('') || '<div class="empty-state" style="padding:24px">◎<br>Sin alumnos en este curso</div>';
+
+  c.innerHTML = `
+    <div class="pg-t">${_legCursoSel.nombre} ${_legCursoSel.division || ''}</div>
+    <div class="pg-s" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="btn-ghost" onclick="rLeg()">‹ Cursos</button>
+      <span style="color:var(--txt3)">·</span>
+      <span style="background:${nc.bg};color:${nc.fg};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600">${nc.txt}</span>
+    </div>
+    <div class="metrics m2" style="margin-top:12px;margin-bottom:12px">
+      <div class="mc"><div class="mc-v" style="color:var(--rojo)">${rojos}</div><div class="mc-l">Situación crítica</div></div>
+      <div class="mc"><div class="mc-v" style="color:var(--ambar)">${amarillos}</div><div class="mc-l">Requieren atención</div></div>
+    </div>
+    <div class="card" style="padding:0">${rows}</div>`;
+}
+
+// ── LEGAJO INDIVIDUAL ─────────────────────────────────
+const LEG_TABS = [
+  { id:'datos',         label:'Datos' },
+  { id:'contactos',     label:'Contactos' },
+  { id:'academico',     label:'Académico' },
+  { id:'asistencia',    label:'Asistencia' },
+  { id:'problematicas', label:'Situaciones' },
+  { id:'eoe',           label:'EOE' },
+  { id:'observaciones', label:'Notas' },
+  { id:'docs',          label:'Docs' },
+];
+
+async function abrirLegajoAlumno(alumnoId) {
+  const alumno = _legAlumnosCache.find(a => a.id === alumnoId);
+  if (!alumno) return;
+  _legAlumnoSel = alumno;
+  _legTab = 0;
+  _legVista = 'legajo';
+
+  const c  = document.getElementById('page-leg');
+  const nc = nivCol(_legCursoSel?.nivel);
+  const sem= _legSemMap[alumnoId] || 'verde';
+  const ini= (alumno.apellido?.[0] || '') + (alumno.nombre?.[0] || '');
+
+  const tabsHtml = LEG_TABS.map((t, i) => `
+    <button class="leg-tab-btn ${i === 0 ? 'on' : ''}" onclick="irTabLeg(${i})">${t.label}</button>`).join('');
+
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <button class="btn-ghost" onclick="abrirCursoLeg('${_legCursoSel?.id}')">‹ ${_legCursoSel?.nombre || ''}</button>
+    </div>
+
+    <div class="card leg-header-card">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="av av40" style="background:${nc.bg};color:${nc.fg};font-size:14px;font-weight:700;position:relative;flex-shrink:0">
+          ${ini}
+          <div class="leg-sem-dot" style="background:${_semClr(sem)}"></div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">${alumno.apellido}, ${alumno.nombre}</div>
+          <div style="font-size:11px;color:var(--txt2)">${_legCursoSel?.nombre || ''} ${_legCursoSel?.division || ''} · <span style="color:${nc.fg}">${nc.txt}</span></div>
+          ${alumno.dni ? `<div style="font-size:10px;color:var(--txt3)">DNI: ${alumno.dni}</div>` : ''}
+          ${alumno.fecha_nacimiento ? `<div style="font-size:10px;color:var(--txt3)">Nacimiento: ${formatFechaLatam(alumno.fecha_nacimiento)}</div>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <div class="leg-tabs-scroll">
+      <div class="leg-tabs">${tabsHtml}</div>
+    </div>
+    <div id="leg-tab-contenido"></div>`;
+
+  await _cargarTabLeg(0);
+}
+
+async function irTabLeg(idx) {
+  _legTab = idx;
+  document.querySelectorAll('.leg-tab-btn').forEach((b, i) => b.classList.toggle('on', i === idx));
+  await _cargarTabLeg(idx);
+}
+
+async function _cargarTabLeg(idx) {
+  const el = document.getElementById('leg-tab-contenido');
+  if (!el) return;
+  el.innerHTML = '<div class="loading-state small"><div class="spinner"></div></div>';
+  const fns = {
+    datos:         _tabDatos,
+    contactos:     _tabContactos,
+    academico:     _tabAcademico,
+    asistencia:    _tabAsistencia,
+    problematicas: _tabProblematicas,
+    eoe:           _tabEOE,
+    observaciones: _tabObservaciones,
+    docs:          _tabDocs,
+  };
+  const fn = fns[LEG_TABS[idx].id];
+  if (fn) await fn(el);
+}
+
+// ── TAB 0: DATOS ──────────────────────────────────────
+async function _tabDatos(c) {
+  const a = _legAlumnoSel;
+  const p = legPermisos();
+  let obs_fam = '';
+  try {
+    const { data } = await sb.from('alumnos').select('observaciones_familiares').eq('id', a.id).single();
+    obs_fam = data?.observaciones_familiares || '';
+  } catch(e) {}
+
+  c.innerHTML = `
+    <div class="card" style="margin-top:12px">
+      <div class="sec-lb" style="margin-bottom:12px">Datos personales</div>
+      <div class="leg-dato-grid">
+        <div class="leg-dato"><span class="leg-dato-l">Apellido</span><span>${a.apellido}</span></div>
+        <div class="leg-dato"><span class="leg-dato-l">Nombre</span><span>${a.nombre}</span></div>
+        <div class="leg-dato"><span class="leg-dato-l">DNI</span><span>${a.dni || '—'}</span></div>
+        <div class="leg-dato"><span class="leg-dato-l">Fecha de nac.</span><span>${a.fecha_nacimiento ? formatFechaLatam(a.fecha_nacimiento) : '—'}</span></div>
+      </div>
+
+      <div style="margin-top:14px;border-top:1px solid var(--brd);padding-top:12px">
+        <div class="sec-lb" style="margin-bottom:6px">Contexto familiar</div>
+        ${p.editarDatos ? `
+          <textarea id="leg-obs-fam" rows="3" placeholder="Información relevante del contexto familiar...">${obs_fam}</textarea>
+          <button class="btn-p" style="margin-top:8px;font-size:11px" onclick="_guardarObsFam('${a.id}')">Guardar</button>
+        ` : obs_fam
+          ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5">${obs_fam}</div>`
+          : `<div style="font-size:11px;color:var(--txt3)">Sin información registrada.</div>`}
+      </div>
+    </div>`;
+}
+
+async function _guardarObsFam(alumnoId) {
+  const txt = document.getElementById('leg-obs-fam')?.value;
+  const { error } = await sb.from('alumnos').update({ observaciones_familiares: txt }).eq('id', alumnoId);
+  if (error) alert('Error: ' + error.message);
+  else alert('Guardado correctamente.');
+}
+
+// ── TAB 1: CONTACTOS ──────────────────────────────────
+async function _tabContactos(c) {
+  const p = legPermisos();
+  try {
+    const { data, error } = await sb.from('contactos_alumno')
+      .select('*').eq('alumno_id', _legAlumnoSel.id)
+      .order('es_principal', { ascending: false });
+    if (error) throw error;
+    const lista = data || [];
+
+    const rows = lista.map(ct => `
+      <div class="leg-contacto-row">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="av av32" style="background:var(--azul-l);color:var(--azul)">
+            ${ct.nombre?.[0]?.toUpperCase() || '?'}
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px">
+              ${ct.nombre}
+              ${ct.es_principal ? '<span class="tag tg" style="font-size:9px">Principal</span>' : ''}
+            </div>
+            <div style="font-size:10px;color:var(--txt2)">${ct.tipo || '—'}</div>
+            ${ct.telefono ? `<div style="font-size:10px;color:var(--txt2)">☎ ${ct.telefono}</div>` : ''}
+            ${ct.email ? `<div style="font-size:10px;color:var(--txt2)">✉ ${ct.email}</div>` : ''}
+          </div>
+        </div>
+      </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin contactos registrados.</div>';
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="sec-lb" style="margin:0">Contactos y responsables</div>
+          ${p.editarContactos ? '<button class="btn-p" style="font-size:11px" onclick="_mostrarFormContacto()">+ Agregar</button>' : ''}
+        </div>
+        ${rows}
+        <div id="form-contacto"></div>
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`; }
+}
+
+function _mostrarFormContacto() {
+  const fc = document.getElementById('form-contacto');
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  fc.innerHTML = `
+    <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <input type="text" id="ct-nombre" placeholder="Nombre y apellido">
+        <select id="ct-tipo">
+          <option value="">Tipo de relación</option>
+          <option>Madre</option><option>Padre</option><option>Tutor/a</option>
+          <option>Abuela/o</option><option>Tío/a</option><option>Otro</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <input type="tel" id="ct-tel" placeholder="Teléfono">
+        <input type="email" id="ct-email" placeholder="Email">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt2);margin-bottom:10px">
+        <input type="checkbox" id="ct-principal"> Contacto principal
+      </label>
+      <div class="acc">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarContacto('${_legAlumnoSel?.id}')">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-contacto').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarContacto(alumnoId) {
+  const nombre = document.getElementById('ct-nombre')?.value.trim();
+  if (!nombre) { alert('El nombre es obligatorio.'); return; }
+  const { error } = await sb.from('contactos_alumno').insert({
+    alumno_id: alumnoId,
+    nombre,
+    tipo:        document.getElementById('ct-tipo')?.value || null,
+    telefono:    document.getElementById('ct-tel')?.value  || null,
+    email:       document.getElementById('ct-email')?.value|| null,
+    es_principal:document.getElementById('ct-principal')?.checked || false,
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await _tabContactos(document.getElementById('leg-tab-contenido'));
+}
+
+// ── TAB 2: ACADÉMICO ──────────────────────────────────
+async function _tabAcademico(c) {
+  try {
+    const { data } = await sb.from('calificaciones')
+      .select('*, materia:materias(nombre)')
+      .eq('alumno_id', _legAlumnoSel.id)
+      .order('periodo').order('created_at', { ascending: false });
+
+    const lista = data || [];
+    if (!lista.length) {
+      c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">≡<br>Sin calificaciones registradas.</div></div>`;
+      return;
+    }
+
+    const porMateria = {};
+    lista.forEach(n => {
+      const m = n.materia?.nombre || n.materia_texto || '—';
+      if (!porMateria[m]) porMateria[m] = [];
+      porMateria[m].push(n);
+    });
+
+    const rows = Object.entries(porMateria).map(([mat, ns]) => {
+      const prom = promedio(ns.map(n => n.nota));
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--brd)">
+          <div style="font-size:11px;font-weight:500">${mat}</div>
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            ${ns.map(n => `<span class="nota-chip ${NC(n.nota)}">${n.nota ?? '—'}</span>`).join('')}
+            ${prom !== null ? `<span class="nota-chip ${NC(prom)}" style="font-weight:700">${prom.toFixed(1)}</span>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div class="sec-lb" style="margin-bottom:10px">Calificaciones por materia</div>
+        ${rows}
+      </div>`;
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">≡<br>Sin calificaciones registradas.</div></div>`;
+  }
+}
+
+// ── TAB 3: ASISTENCIA ─────────────────────────────────
+async function _tabAsistencia(c) {
+  try {
+    const { data, error } = await sb.from('asistencias')
+      .select('fecha,estado,justificacion,tipo_registro')
+      .eq('alumno_id', _legAlumnoSel.id)
+      .order('fecha', { ascending: false })
+      .limit(60);
+    if (error) throw error;
+    const lista = data || [];
+
+    if (!lista.length) {
+      c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">✓<br>Sin registros de asistencia.</div></div>`;
+      return;
+    }
+
+    const ausentes  = lista.filter(r => r.estado === 'ausente').length;
+    const tardanzas = lista.filter(r => r.estado === 'tardanza').length;
+    const retiros   = lista.filter(r => r.estado === 'retiro').length;
+    const pct = Math.round(((lista.length - ausentes) / lista.length) * 100);
+
+    const rows = lista.slice(0, 30).map(r => {
+      const clr = r.estado === 'presente' ? 'var(--verde)' : r.estado === 'ausente' ? 'var(--rojo)' : 'var(--ambar)';
+      return `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd)">
+          <div style="width:8px;height:8px;border-radius:50%;background:${clr};flex-shrink:0"></div>
+          <div style="font-size:11px;flex:1">${formatFechaLatam(r.fecha)}</div>
+          <div style="font-size:10px;color:${clr};font-weight:500;text-transform:capitalize">${r.estado}</div>
+          ${r.justificacion ? `<div style="font-size:10px;color:var(--txt3)">${r.justificacion}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div class="metrics m3" style="margin-bottom:14px">
+          <div class="mc"><div class="mc-v" style="color:var(--verde)">${pct}%</div><div class="mc-l">Asistencia</div></div>
+          <div class="mc"><div class="mc-v" style="color:var(--rojo)">${ausentes}</div><div class="mc-l">Inasistencias</div></div>
+          <div class="mc"><div class="mc-v" style="color:var(--ambar)">${tardanzas + retiros}</div><div class="mc-l">Tardanzas</div></div>
+        </div>
+        <div class="sec-lb" style="margin-bottom:8px">Últimos registros</div>
+        ${rows}
+      </div>`;
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">✓<br>Sin registros de asistencia.</div></div>`;
+  }
+}
+
+// ── TAB 4: PROBLEMÁTICAS ──────────────────────────────
+async function _tabProblematicas(c) {
+  const id = 'leg-probs-' + _legAlumnoSel.id;
+  c.innerHTML = `<div id="${id}" style="margin-top:12px"></div>`;
+  await cargarProbAlumno(_legAlumnoSel.id, id);
+}
+
+// ── TAB 5: EOE ───────────────────────────────────────
+async function _tabEOE(c) {
+  const p = legPermisos();
+  if (!p.verEOE) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">✦<br>Sin acceso a registros EOE.</div></div>`;
+    return;
+  }
+  try {
+    const { data, error } = await sb.from('intervenciones_eoe')
+      .select('*, reg:usuarios!intervenciones_eoe_registrado_por_fkey(nombre_completo)')
+      .eq('alumno_id', _legAlumnoSel.id)
+      .order('fecha', { ascending: false });
+    if (error) throw error;
+    const lista = data || [];
+
+    const rows = lista.map(i => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--brd)">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px">
+          <div style="font-size:11px;font-weight:600;color:var(--azul)">${i.tipo || 'Intervención EOE'}</div>
+          <div style="font-size:10px;color:var(--txt3)">${formatFechaLatam(i.fecha)}</div>
+        </div>
+        <div style="font-size:11px;color:var(--txt);line-height:1.5">${i.descripcion}</div>
+        ${i.derivacion ? `<div style="font-size:10px;color:var(--txt2);margin-top:4px">Derivación: ${i.derivacion}</div>` : ''}
+        <div style="font-size:10px;color:var(--txt3);margin-top:4px">${i.reg?.nombre_completo || '—'}</div>
+      </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin intervenciones EOE registradas.</div>';
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="sec-lb" style="margin:0">Intervenciones EOE</div>
+          ${p.agregarEOE ? `<button class="btn-p" style="font-size:11px" onclick="_mostrarFormEOE('${_legAlumnoSel.id}')">+ Registrar</button>` : ''}
+        </div>
+        ${rows}
+        <div id="form-eoe"></div>
+      </div>`;
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`;
+  }
+}
+
+function _mostrarFormEOE(alumnoId) {
+  const fc = document.getElementById('form-eoe');
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  fc.innerHTML = `
+    <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <select id="eoe-tipo">
+          <option value="">Tipo de intervención</option>
+          <option>Entrevista individual</option><option>Entrevista familiar</option>
+          <option>Derivación externa</option><option>Reunión de equipo</option>
+          <option>Seguimiento</option><option>Otro</option>
+        </select>
+        <input type="date" id="eoe-fecha" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <textarea id="eoe-desc" rows="3" placeholder="Descripción de la intervención..."></textarea>
+      <input type="text" id="eoe-deriv" placeholder="Derivación a (si aplica)" style="margin-top:8px">
+      <div class="acc" style="margin-top:10px">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarIntervencionEOE('${alumnoId}')">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-eoe').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarIntervencionEOE(alumnoId) {
+  const desc = document.getElementById('eoe-desc')?.value.trim();
+  if (!desc) { alert('La descripción es obligatoria.'); return; }
+  const { error } = await sb.from('intervenciones_eoe').insert({
+    alumno_id:      alumnoId,
+    registrado_por: USUARIO_ACTUAL.id,
+    tipo:           document.getElementById('eoe-tipo')?.value  || null,
+    descripcion:    desc,
+    derivacion:     document.getElementById('eoe-deriv')?.value || null,
+    fecha:          document.getElementById('eoe-fecha')?.value || new Date().toISOString().slice(0,10),
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await _tabEOE(document.getElementById('leg-tab-contenido'));
+}
+
+// ── TAB 6: OBSERVACIONES ─────────────────────────────
+async function _tabObservaciones(c) {
+  const p = legPermisos();
+  try {
+    const { data, error } = await sb.from('observaciones_legajo')
+      .select('*, reg:usuarios!observaciones_legajo_registrado_por_fkey(nombre_completo)')
+      .eq('alumno_id', _legAlumnoSel.id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const lista = (data || []).filter(o => !o.privada || p.verObsPrivadas);
+
+    const rows = lista.map(o => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--brd)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <div style="font-size:10px;color:var(--txt3)">${o.reg?.nombre_completo || '—'} · ${tiempoDesde(o.created_at)}</div>
+          ${o.privada ? '<span class="tag td" style="font-size:9px">Privada</span>' : ''}
+        </div>
+        <div style="font-size:11px;color:var(--txt);line-height:1.5">${o.texto}</div>
+      </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin observaciones registradas.</div>';
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="sec-lb" style="margin:0">Observaciones</div>
+          ${p.agregarObservaciones ? '<button class="btn-p" style="font-size:11px" onclick="_mostrarFormObs()">+ Agregar</button>' : ''}
+        </div>
+        ${rows}
+        <div id="form-obs"></div>
+      </div>`;
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`;
+  }
+}
+
+function _mostrarFormObs() {
+  const fc = document.getElementById('form-obs');
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  const p = legPermisos();
+  fc.innerHTML = `
+    <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+      <textarea id="obs-texto" rows="3" placeholder="Escribí tu observación..."></textarea>
+      ${p.marcarPrivada ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt2);margin-top:8px">
+        <input type="checkbox" id="obs-privada"> Solo visible para EOE y Dirección
+      </label>` : ''}
+      <div class="acc" style="margin-top:10px">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarObservacion('${_legAlumnoSel?.id}')">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-obs').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarObservacion(alumnoId) {
+  const texto = document.getElementById('obs-texto')?.value.trim();
+  if (!texto) { alert('Escribí una observación.'); return; }
+  const { error } = await sb.from('observaciones_legajo').insert({
+    alumno_id:      alumnoId,
+    registrado_por: USUARIO_ACTUAL.id,
+    texto,
+    privada: document.getElementById('obs-privada')?.checked || false,
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await _tabObservaciones(document.getElementById('leg-tab-contenido'));
+}
+
+// ── TAB 7: DOCUMENTACIÓN ─────────────────────────────
+async function _tabDocs(c) {
+  const p = legPermisos();
+  try {
+    const { data, error } = await sb.from('documentacion_alumno')
+      .select('*, sub:usuarios!documentacion_alumno_subido_por_fkey(nombre_completo)')
+      .eq('alumno_id', _legAlumnoSel.id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const lista = data || [];
+
+    const rows = lista.map(d => `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--brd)">
+        <div style="font-size:22px;flex-shrink:0">▤</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:500">${d.nombre}</div>
+          <div style="font-size:10px;color:var(--txt2)">${d.tipo || '—'} · ${d.sub?.nombre_completo || '—'}</div>
+          <div style="font-size:10px;color:var(--txt3)">${tiempoDesde(d.created_at)}</div>
+        </div>
+        ${d.url ? `<a href="${d.url}" target="_blank" class="btn-s" style="font-size:10px;padding:4px 10px;text-decoration:none;display:inline-block">Ver</a>` : ''}
+      </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin documentos cargados.</div>';
+
+    c.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="sec-lb" style="margin:0">Documentación</div>
+          ${p.subirDocs ? `<button class="btn-p" style="font-size:11px" onclick="_mostrarFormDoc('${_legAlumnoSel.id}')">+ Agregar</button>` : ''}
+        </div>
+        ${rows}
+        <div id="form-doc"></div>
+      </div>`;
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">▤<br>Error: ${e.message}</div></div>`;
+  }
+}
+
+function _mostrarFormDoc(alumnoId) {
+  const fc = document.getElementById('form-doc');
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  fc.innerHTML = `
+    <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <input type="text" id="doc-nombre" placeholder="Nombre del documento">
+        <select id="doc-tipo">
+          <option value="">Tipo</option>
+          <option>DNI</option><option>Partida de nacimiento</option>
+          <option>Certificado médico</option><option>Constancia CUIL</option>
+          <option>Informe escolar</option><option>Otro</option>
+        </select>
+      </div>
+      <input type="url" id="doc-url" placeholder="URL (Google Drive, etc.)" style="margin-bottom:8px">
+      <div class="acc">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarDoc('${alumnoId}')">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-doc').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarDoc(alumnoId) {
+  const nombre = document.getElementById('doc-nombre')?.value.trim();
+  if (!nombre) { alert('El nombre es obligatorio.'); return; }
+  const { error } = await sb.from('documentacion_alumno').insert({
+    alumno_id:  alumnoId,
+    subido_por: USUARIO_ACTUAL.id,
+    nombre,
+    tipo: document.getElementById('doc-tipo')?.value || null,
+    url:  document.getElementById('doc-url')?.value  || null,
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await _tabDocs(document.getElementById('leg-tab-contenido'));
+}
+
+// ── ESTILOS ───────────────────────────────────────────
+function inyectarEstilosLeg() {
+  if (document.getElementById('leg-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'leg-styles';
+  s.textContent = `
+    .leg-nivel-header{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;padding-left:2px}
+    .leg-cursos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+    .leg-curso-card{background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad);padding:14px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s,border-color .15s}
+    .leg-curso-card:hover{box-shadow:0 2px 10px rgba(0,0,0,.1);border-color:var(--verde)}
+    .leg-curso-badge{font-size:16px;font-weight:700;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Lora',serif}
+    .leg-curso-nombre{font-size:11px;font-weight:500;color:var(--txt);line-height:1.3}
+    .leg-curso-arrow{font-size:14px;color:var(--txt3);align-self:flex-end}
+    .leg-alumno-row{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--brd);transition:background .1s}
+    .leg-alumno-row:last-child{border-bottom:none}
+    .leg-alumno-row:hover{background:var(--surf2)}
+    .leg-semaforo{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+    .leg-header-card{margin-top:12px;margin-bottom:0}
+    .leg-sem-dot{position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--surf)}
+    .leg-tabs-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:12px;padding-bottom:2px}
+    .leg-tabs{display:flex;gap:4px;min-width:max-content}
+    .leg-tab-btn{background:var(--surf);border:1px solid var(--brd);border-radius:20px;padding:5px 13px;font-size:11px;font-weight:500;cursor:pointer;color:var(--txt2);font-family:'DM Sans',sans-serif;white-space:nowrap;transition:all .12s}
+    .leg-tab-btn.on{background:var(--verde);color:#fff;border-color:var(--verde)}
+    .leg-tab-btn:hover:not(.on){background:var(--verde-l);color:var(--verde);border-color:var(--verde)}
+    .leg-dato-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .leg-dato{display:flex;flex-direction:column;gap:3px}
+    .leg-dato-l{font-size:10px;color:var(--txt2);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+    .leg-contacto-row{padding:10px 0;border-bottom:1px solid var(--brd)}
+    .leg-contacto-row:last-child{border-bottom:none}
+    .nota-chip{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;border-radius:6px;font-size:11px;font-weight:600;padding:0 6px}
+    .nota-ok{background:var(--verde-l);color:var(--verde)}
+    .nota-warn{background:var(--amb-l);color:var(--ambar)}
+    .nota-risk{background:var(--rojo-l);color:var(--rojo)}
+    .btn-ghost{background:none;border:none;cursor:pointer;color:var(--verde);font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;font-family:'DM Sans',sans-serif;transition:background .12s}
+    .btn-ghost:hover{background:var(--verde-l)}
+    @media(max-width:600px){
+      .leg-cursos-grid{grid-template-columns:repeat(2,1fr)}
+      .leg-dato-grid{grid-template-columns:1fr}
+    }
+  `;
+  document.head.appendChild(s);
+}
