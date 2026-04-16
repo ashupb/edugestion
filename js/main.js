@@ -119,6 +119,8 @@ function toggleSidebar() {
   } else {
     SB_OPEN = !SB_OPEN;
     sidebar.classList.toggle('collapsed', !SB_OPEN);
+    const icon = document.getElementById('sb-toggle-icon');
+    if (icon) icon.textContent = SB_OPEN ? '‹' : '›';
   }
 }
 function toggleDark() {
@@ -249,40 +251,40 @@ function toggleMobileSidebar() {
 // ── BOTTOM NAV MOBILE ─────────────────────────────────
 const BOTTOM_NAV_ITEMS = {
   director_general: [
-    { id:'dash',    icon:'🏠', label:'Inicio' },
-    { id:'agenda',  icon:'📅', label:'Agenda' },
-    { id:'prob',    icon:'⚠️', label:'Situaciones' },
-    { id:'leg',     icon:'🗂️', label:'Legajos' },
-    { id:'obj',     icon:'🎯', label:'Objetivos' },
+    { id:'dash',    icon:'⌂',  label:'Inicio' },
+    { id:'agenda',  icon:'▦',  label:'Agenda' },
+    { id:'prob',    icon:'△',  label:'Situaciones' },
+    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'obj',     icon:'◎',  label:'Objetivos' },
   ],
   directivo_nivel: [
-    { id:'dash',    icon:'🏠', label:'Inicio' },
-    { id:'agenda',  icon:'📅', label:'Agenda' },
-    { id:'prob',    icon:'⚠️', label:'Situaciones' },
-    { id:'leg',     icon:'🗂️', label:'Legajos' },
-    { id:'obj',     icon:'🎯', label:'Objetivos' },
+    { id:'dash',    icon:'⌂',  label:'Inicio' },
+    { id:'agenda',  icon:'▦',  label:'Agenda' },
+    { id:'prob',    icon:'△',  label:'Situaciones' },
+    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'obj',     icon:'◎',  label:'Objetivos' },
   ],
   eoe: [
-    { id:'dash',    icon:'🏠', label:'Inicio' },
-    { id:'agenda',  icon:'📅', label:'Agenda' },
-    { id:'eoe',     icon:'🧠', label:'Casos' },
-    { id:'leg',     icon:'🗂️', label:'Legajos' },
-    { id:'prob',    icon:'⚠️', label:'Situaciones' },
+    { id:'dash',    icon:'⌂',  label:'Inicio' },
+    { id:'agenda',  icon:'▦',  label:'Agenda' },
+    { id:'eoe',     icon:'✦',  label:'Casos' },
+    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'prob',    icon:'△',  label:'Situaciones' },
   ],
   docente: [
-    { id:'dash',    icon:'🏠', label:'Inicio' },
-    { id:'agenda',  icon:'📅', label:'Agenda' },
-    { id:'asist',   icon:'✅', label:'Asistencia' },
-    { id:'notas',   icon:'📊', label:'Notas' },
-    { id:'prob',    icon:'⚠️', label:'Reportar' },
+    { id:'dash',    icon:'⌂',  label:'Inicio' },
+    { id:'agenda',  icon:'▦',  label:'Agenda' },
+    { id:'asist',   icon:'✓',  label:'Asistencia' },
+    { id:'notas',   icon:'≡',  label:'Notas' },
+    { id:'prob',    icon:'△',  label:'Reportar' },
   ],
   preceptor: [
-    { id:'dash',    icon:'🏠', label:'Inicio' },
-    { id:'agenda',  icon:'📅', label:'Agenda' },
-    { id:'asist',   icon:'✅', label:'Lista' },
-    { id:'notas', icon:'📊', label:'Notas' },
-    { id:'leg',     icon:'🗂️', label:'Legajos' },
-    { id:'prob',    icon:'⚠️', label:'Reportar' },
+    { id:'dash',    icon:'⌂',  label:'Inicio' },
+    { id:'agenda',  icon:'▦',  label:'Agenda' },
+    { id:'asist',   icon:'✓',  label:'Lista' },
+    { id:'notas',   icon:'≡',  label:'Notas' },
+    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'prob',    icon:'△',  label:'Reportar' },
   ],
 };
 

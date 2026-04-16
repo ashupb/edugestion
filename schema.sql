@@ -1,5 +1,5 @@
 -- =====================================================
--- EduGestión · Haras del Sur College
+-- EduGestión · Kairos
 -- Schema completo para Supabase
 -- Ejecutar en: Supabase → SQL Editor → New Query
 -- =====================================================
@@ -257,13 +257,13 @@ create policy "asistencias_institucion" on asistencias
   );
 
 -- =====================================================
--- DATOS DEMO: Haras del Sur College
+-- DATOS DEMO: Kairos
 -- Ejecutar DESPUÉS del schema
 -- =====================================================
 
 -- Institución
 insert into instituciones (id, nombre, localidad) values
-  ('00000000-0000-0000-0000-000000000001', 'Haras del Sur College', 'La Plata, Buenos Aires');
+  ('00000000-0000-0000-0000-000000000001', 'Kairos', 'La Plata, Buenos Aires');
 
 -- Objetivos de ejemplo
 insert into objetivos (institucion_id, creado_por, nombre, icono, descripcion, responsable_texto, meta, cumplimiento, estado, tendencia, fecha_inicio, fecha_cierre) values
