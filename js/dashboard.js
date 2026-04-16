@@ -26,7 +26,7 @@ async function rDashDirector() {
   const miId   = USUARIO_ACTUAL.id;
   const hoy    = new Date().toISOString().split('T')[0];
 
-  const [probRes, objRes, eventosRes, respRes] = await Promise.all([
+  const [probRes, objRes, eventosRes, respRes, alertasRes] = await Promise.all([
     sb.from('problematicas').select('*').eq('institucion_id', instId).in('estado',['abierta','en_seguimiento']),
     sb.from('objetivos').select('*').eq('institucion_id', instId),
     sb.from('eventos_institucionales')
@@ -38,12 +38,19 @@ async function rDashDirector() {
       .select('*, eventos_institucionales(nombre, hora, lugar, nivel, convocados_ids, convocatoria_grupos)')
       .eq('usuario_id', miId)
       .eq('respuesta', 'pendiente'),
+    sb.from('alertas_problematicas')
+      .select('*, problematica:problematicas(id,tipo,urgencia,alumno:alumnos(nombre,apellido))')
+      .eq('usuario_id', miId)
+      .eq('leida', false)
+      .order('created_at', { ascending: false })
+      .limit(10),
   ]);
 
   const problematicas = probRes.data    || [];
   const objetivos     = objRes.data     || [];
   const eventosHoy    = eventosRes.data || [];
   const pendientes    = (respRes.data   || []).filter(r => r.eventos_institucionales);
+  const alertasProb   = alertasRes.error ? [] : (alertasRes.data || []);
 
   const objRiesgo = objetivos.filter(o => o.estado === 'riesgo' || o.estado === 'risk');
 
@@ -145,10 +152,32 @@ async function rDashDirector() {
       </div>`;
   };
 
+  const alertasProbHTML = alertasProb.length ? `
+    <div class="alr" style="margin-bottom:14px;border-left-color:var(--rojo)">
+      <div class="alr-t" style="display:flex;justify-content:space-between;align-items:center">
+        <span>△ ${alertasProb.length} alerta${alertasProb.length > 1 ? 's' : ''} de problemáticas sin leer</span>
+        <button class="btn-d" style="font-size:9px;padding:3px 8px" onclick="marcarAlertasProbLeidas()">Marcar leídas</button>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+        ${alertasProb.slice(0,5).map(a => {
+          const p = a.problematica;
+          const nom = p?.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
+          const urgCls = p?.urgencia === 'alta' ? 'tr' : p?.urgencia === 'media' ? 'ta' : 'tg';
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer" onclick="goPage('prob')">
+            <span class="tag ${urgCls}" style="font-size:9px">Urg. ${p?.urgencia || '—'}</span>
+            <span>${nom} · ${labelTipo(p?.tipo)}</span>
+          </div>`;
+        }).join('')}
+        ${alertasProb.length > 5 ? `<div style="font-size:10px;color:var(--txt3);margin-top:2px">+${alertasProb.length - 5} más → <span style="color:var(--rojo);cursor:pointer" onclick="goPage('prob')">Ver todas</span></div>` : ''}
+      </div>
+    </div>` : '';
+
   const c = document.getElementById('page-dash');
   c.innerHTML = `
     <div class="pg-t">${saludo}, ${apellido} 👋</div>
     <div class="pg-s" style="margin-bottom:14px">${fechaStr} · ${instNombre}</div>
+
+    ${alertasProbHTML}
 
     ${objRiesgo.length ? `
     <div class="alr" style="margin-bottom:14px">
@@ -218,23 +247,48 @@ async function rDashEOE() {
   const miId   = USUARIO_ACTUAL.id;
   const hoy    = new Date().toISOString().split('T')[0];
 
-  const [casosRes, eventosRes, respRes] = await Promise.all([
+  const [casosRes, eventosRes, respRes, alertasRes] = await Promise.all([
     sb.from('problematicas').select('*').eq('institucion_id', instId).in('estado',['abierta','en_seguimiento']),
     sb.from('eventos_institucionales').select('*').eq('institucion_id', instId).eq('fecha_inicio', hoy).order('hora', { nullsFirst: false }),
     sb.from('evento_respuestas').select('*, eventos_institucionales(nombre, hora, lugar)').eq('usuario_id', miId).eq('respuesta','pendiente'),
+    sb.from('alertas_problematicas')
+      .select('*, problematica:problematicas(id,tipo,urgencia,alumno:alumnos(nombre,apellido))')
+      .eq('usuario_id', miId).eq('leida', false)
+      .order('created_at', { ascending: false }).limit(10),
   ]);
 
-  const casos     = casosRes.data    || [];
-  const eventos   = eventosRes.data  || [];
-  const pendientes = (respRes.data   || []).filter(r => r.eventos_institucionales);
-  const urgentes  = casos.filter(p => p.urgencia === 'alta');
+  const casos      = casosRes.data    || [];
+  const eventos    = eventosRes.data  || [];
+  const pendientes = (respRes.data    || []).filter(r => r.eventos_institucionales);
+  const alertasProb = alertasRes.error ? [] : (alertasRes.data || []);
+  const urgentes   = casos.filter(p => p.urgencia === 'alta');
 
   const apellido = (USUARIO_ACTUAL.nombre_completo||'').split(',')[0];
+
+  const alertasProbEOE = alertasProb.length ? `
+    <div class="alr" style="margin-bottom:14px;border-left-color:var(--rojo)">
+      <div class="alr-t" style="display:flex;justify-content:space-between;align-items:center">
+        <span>△ ${alertasProb.length} problemática${alertasProb.length > 1 ? 's' : ''} nueva${alertasProb.length > 1 ? 's' : ''} sin leer</span>
+        <button class="btn-d" style="font-size:9px;padding:3px 8px" onclick="marcarAlertasProbLeidas()">Marcar leídas</button>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+        ${alertasProb.slice(0,5).map(a => {
+          const p = a.problematica;
+          const nom = p?.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
+          const urgCls = p?.urgencia === 'alta' ? 'tr' : p?.urgencia === 'media' ? 'ta' : 'tg';
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer" onclick="goPage('prob')">
+            <span class="tag ${urgCls}" style="font-size:9px">Urg. ${p?.urgencia || '—'}</span>
+            <span>${nom} · ${labelTipo(p?.tipo)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
 
   document.getElementById('page-dash').innerHTML = `
     <div class="pg-t">Bienvenida, ${apellido} 👋</div>
     <div class="pg-s">Orientación escolar · ${new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'})}</div>
 
+    ${alertasProbEOE}
     ${urgentes.length ? `<div class="alr"><div class="alr-t">⚠️ ${urgentes.length} caso(s) urgente(s)</div>
     <div class="acc"><button class="btn-d" onclick="goPage('eoe')">Ver casos →</button></div></div>` : ''}
 
@@ -446,4 +500,17 @@ async function rDashPreceptor() {
     </div>`;
 
   inyectarEstilosDash();
+}
+
+// ─── ALERTAS PROBLEMÁTICAS ────────────────────────────
+async function marcarAlertasProbLeidas() {
+  await sb.from('alertas_problematicas')
+    .update({ leida: true })
+    .eq('usuario_id', USUARIO_ACTUAL.id)
+    .eq('leida', false);
+  rDash();
+}
+async function marcarAlertaProbLeida(alertaId) {
+  await sb.from('alertas_problematicas').update({ leida: true }).eq('id', alertaId);
+  rDash();
 }

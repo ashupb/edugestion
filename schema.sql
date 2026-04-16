@@ -257,6 +257,58 @@ create policy "asistencias_institucion" on asistencias
   );
 
 -- =====================================================
+-- MIGRACIONES v2 — Problemáticas ampliado
+-- Ejecutar en Supabase → SQL Editor
+-- =====================================================
+
+-- 1. Agregar nivel y cursos_ids a usuarios
+alter table usuarios
+  add column if not exists nivel text check (nivel in ('inicial','primario','secundario')),
+  add column if not exists cursos_ids uuid[];
+
+-- Actualizar constraint de rol para incluir director_general y directivo_nivel
+alter table usuarios drop constraint if exists usuarios_rol_check;
+alter table usuarios add constraint usuarios_rol_check
+  check (rol in ('director_general','directivo_nivel','docente','preceptor','eoe','admin'));
+
+-- 2. Agregar nivel a cursos
+alter table cursos
+  add column if not exists nivel text check (nivel in ('inicial','primario','secundario'));
+
+-- 3. Ampliar tabla problematicas
+alter table problematicas
+  add column if not exists nivel         text check (nivel in ('inicial','primario','secundario')),
+  add column if not exists responsable_id uuid references usuarios(id),
+  add column if not exists motivo_cierre  text,
+  add column if not exists cerrado_por    uuid references usuarios(id),
+  add column if not exists cerrado_at     timestamptz,
+  add column if not exists reabierto_por  uuid references usuarios(id),
+  add column if not exists reabierto_at   timestamptz;
+
+-- Ampliar tipos permitidos
+alter table problematicas drop constraint if exists problematicas_tipo_check;
+alter table problematicas add constraint problematicas_tipo_check
+  check (tipo in ('académica','conductual','familiar','salud','socioemocional','ausentismo','otros',
+                  'convivencia','emocional','aprendizaje','conducta','otro'));
+
+-- Ampliar estados permitidos
+alter table problematicas drop constraint if exists problematicas_estado_check;
+alter table problematicas add constraint problematicas_estado_check
+  check (estado in ('abierta','en_seguimiento','cerrada','resuelta','derivada'));
+
+-- 4. Tabla de alertas de problemáticas
+create table if not exists alertas_problematicas (
+  id               uuid primary key default gen_random_uuid(),
+  problematica_id  uuid references problematicas(id) on delete cascade,
+  usuario_id       uuid references usuarios(id) on delete cascade,
+  leida            boolean default false,
+  created_at       timestamptz default now()
+);
+alter table alertas_problematicas enable row level security;
+create policy if not exists "alertas_prob_propias" on alertas_problematicas
+  for all using (usuario_id = auth.uid());
+
+-- =====================================================
 -- DATOS DEMO: Kairos
 -- Ejecutar DESPUÉS del schema
 -- =====================================================

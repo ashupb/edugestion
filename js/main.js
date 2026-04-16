@@ -202,10 +202,18 @@ function tiempoDesde(iso) {
   return `hace ${Math.floor(hrs / 24)} días`;
 }
 function labelTipo(t) {
-  return { convivencia:'Convivencia', emocional:'Emocional', familiar:'Familiar', aprendizaje:'Aprendizaje', salud:'Salud', conducta:'Conducta', otro:'Otro' }[t] || t;
+  return {
+    convivencia:'Convivencia', emocional:'Emocional', familiar:'Familiar',
+    aprendizaje:'Aprendizaje', salud:'Salud', conducta:'Conducta', otro:'Otro',
+    académica:'Académica', conductual:'Conductual', socioemocional:'Socioemocional',
+    ausentismo:'Ausentismo', otros:'Otros',
+  }[t] || (t || '—');
 }
 function labelEstado(e) {
-  return { abierta:'Sin atender', en_seguimiento:'En seguimiento', resuelta:'Resuelto', derivada:'Derivado' }[e] || e;
+  return {
+    abierta:'Sin atender', en_seguimiento:'En seguimiento',
+    resuelta:'Cerrada', derivada:'Derivada', cerrada:'Cerrada',
+  }[e] || e;
 }
 function labelEstadoCls(e) {
   return e === 'abierta' ? 'tr' : e === 'en_seguimiento' ? 'ta' : 'tg';

@@ -184,36 +184,86 @@ async function guardarObj() {
 async function rLeg() {
   showLoading('leg');
   try {
-    const {data,error}=await sb.from('alumnos')
-      .select('id,nombre,apellido,curso:cursos(nombre,division)')
-      .eq('institucion_id',USUARIO_ACTUAL.institucion_id)
+    const { data, error } = await sb.from('alumnos')
+      .select('id,nombre,apellido,dni,fecha_nacimiento,curso:cursos(id,nombre,division,nivel)')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .order('apellido');
     if (error) throw error;
-    window._alumnosCache=data||[];
-    const c=document.getElementById('page-leg');
-    c.innerHTML=`
+    window._alumnosCache = data || [];
+    const c = document.getElementById('page-leg');
+    c.innerHTML = `
       <div class="pg-t">Legajos</div>
-      <div class="pg-s">Alumnos · ${INSTITUCION_ACTUAL?.nombre||''}</div>
+      <div class="pg-s">Alumnos · ${INSTITUCION_ACTUAL?.nombre || ''}</div>
       <input type="text" placeholder="Buscar por apellido o nombre..." oninput="filtrarAlum(this.value)" style="margin-bottom:12px">
-      <div id="leg-lista">${renderAlumnos(data||[])}</div>`;
-  } catch(e){showError('leg','Error: '+e.message);}
+      <div id="leg-lista">${renderAlumnos(data || [])}</div>
+      <div id="leg-detalle"></div>`;
+  } catch(e) { showError('leg', 'Error: ' + e.message); }
 }
 
 function filtrarAlum(q) {
-  const t=window._alumnosCache||[];
-  const f=q.length<2?t:t.filter(a=>a.apellido?.toLowerCase().includes(q.toLowerCase())||a.nombre?.toLowerCase().includes(q.toLowerCase()));
-  document.getElementById('leg-lista').innerHTML=renderAlumnos(f);
+  const t = window._alumnosCache || [];
+  const f = q.length < 2 ? t : t.filter(a =>
+    a.apellido?.toLowerCase().includes(q.toLowerCase()) ||
+    a.nombre?.toLowerCase().includes(q.toLowerCase())
+  );
+  document.getElementById('leg-lista').innerHTML = renderAlumnos(f);
+  document.getElementById('leg-detalle').innerHTML = '';
+  window._legAlumnoAbierto = null;
 }
 
 function renderAlumnos(lista) {
-  if (!lista.length) return '<div class="empty-state">🔍<br>Sin resultados</div>';
-  return `<div class="card" style="padding:0">`+lista.map(a=>`
-    <div class="leg-alumno-row">
-      <div class="av av32" style="background:var(--verde-l);color:var(--verde)">${(a.apellido?.[0]||'')+(a.nombre?.[0]||'')}</div>
-      <div style="flex:1"><div style="font-size:12px;font-weight:500">${a.apellido}, ${a.nombre}</div>
-      <div style="font-size:10px;color:var(--txt2)">${a.curso?.nombre||''}${a.curso?.division||''}</div></div>
-      <span style="font-size:11px;color:var(--txt2)">›</span>
-    </div>`).join('')+`</div>`;
+  if (!lista.length) return '<div class="empty-state">◎<br>Sin resultados</div>';
+  return `<div class="card" style="padding:0">` + lista.map(a => `
+    <div class="leg-alumno-row" onclick="abrirLegajoAlumno('${a.id}')">
+      <div class="av av32" style="background:var(--verde-l);color:var(--verde)">${(a.apellido?.[0] || '') + (a.nombre?.[0] || '')}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:500">${a.apellido}, ${a.nombre}</div>
+        <div style="font-size:10px;color:var(--txt2)">${a.curso?.nombre || ''}${a.curso?.division || ''}${a.curso?.nivel ? ' · ' + a.curso.nivel[0].toUpperCase() + a.curso.nivel.slice(1) : ''}</div>
+      </div>
+      <span style="font-size:13px;color:var(--txt2)">›</span>
+    </div>`).join('') + `</div>`;
+}
+
+async function abrirLegajoAlumno(alumnoId) {
+  const det = document.getElementById('leg-detalle');
+  if (!det) return;
+
+  // Toggle: cerrar si ya estaba abierto el mismo
+  if (window._legAlumnoAbierto === alumnoId) {
+    window._legAlumnoAbierto = null;
+    det.innerHTML = '';
+    return;
+  }
+  window._legAlumnoAbierto = alumnoId;
+
+  const alumno = (window._alumnosCache || []).find(a => a.id === alumnoId);
+  if (!alumno) return;
+
+  const cur   = alumno.curso;
+  const curso = cur ? `${cur.nombre} ${cur.division || ''}`.trim() : '—';
+  const nivel = cur?.nivel ? cur.nivel[0].toUpperCase() + cur.nivel.slice(1) : '—';
+
+  det.innerHTML = `
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div class="av av40" style="background:var(--verde);color:#fff;font-size:14px">
+          ${(alumno.apellido?.[0] || '') + (alumno.nombre?.[0] || '')}
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:600">${alumno.apellido}, ${alumno.nombre}</div>
+          <div style="font-size:11px;color:var(--txt2)">${curso} · ${nivel}</div>
+          ${alumno.dni ? `<div style="font-size:10px;color:var(--txt3)">DNI: ${alumno.dni}</div>` : ''}
+          ${alumno.fecha_nacimiento ? `<div style="font-size:10px;color:var(--txt3)">Nac: ${formatFechaLatam(alumno.fecha_nacimiento)}</div>` : ''}
+        </div>
+        <button class="btn-s" style="margin-left:auto;font-size:10px" onclick="abrirLegajoAlumno('${alumnoId}')">Cerrar</button>
+      </div>
+
+      <div class="sec-lb">Problemáticas</div>
+      <div id="leg-prob-${alumnoId}"><div class="loading-state small"><div class="spinner"></div></div></div>
+    </div>`;
+
+  det.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  await cargarProbAlumno(alumnoId, `leg-prob-${alumnoId}`);
 }
 
 // =====================================================

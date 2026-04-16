@@ -1,24 +1,100 @@
 // =====================================================
-// PROBLEMATICAS.JS
+// PROBLEMATICAS.JS — v2
 // =====================================================
 
+let _probFiltros = { estado: 'activas', urgencia: 'todas', nivel: 'todos' };
+
+// ─── HELPERS ──────────────────────────────────────────
+function labelTipoProb(t) {
+  return {
+    académica:'Académica', conductual:'Conductual', familiar:'Familiar',
+    salud:'Salud', socioemocional:'Socioemocional', ausentismo:'Ausentismo', otros:'Otros',
+    convivencia:'Convivencia', emocional:'Emocional', aprendizaje:'Aprendizaje',
+    conducta:'Conducta', otro:'Otro',
+  }[t] || (t || '—');
+}
+
+const TIPOS_LABEL_PROB = ['Académica','Conductual','Familiar','Salud','Socioemocional','Ausentismo','Otros'];
+const TIPOS_VALOR_PROB = {
+  'Académica':'académica', 'Conductual':'conductual', 'Familiar':'familiar',
+  'Salud':'salud', 'Socioemocional':'socioemocional', 'Ausentismo':'ausentismo', 'Otros':'otros',
+};
+
+// ─── PERMISOS ─────────────────────────────────────────
+function probPermisos() {
+  const rol = USUARIO_ACTUAL.rol;
+  return {
+    verTodas:    ['director_general','directivo_nivel','eoe'].includes(rol),
+    soloPropias: rol === 'docente',
+    soloCursos:  rol === 'preceptor',
+    crear:       true,
+    agregarSeg:  ['director_general','directivo_nivel','eoe','preceptor'].includes(rol),
+    cerrar:      ['director_general','directivo_nivel','eoe'].includes(rol),
+    reabrir:     ['director_general','directivo_nivel','eoe'].includes(rol),
+  };
+}
+
+function puedeAgregarSeg(prob) {
+  const perm = probPermisos();
+  return perm.agregarSeg || (prob && prob.responsable_id === USUARIO_ACTUAL.id);
+}
+
+// ─── DATA FETCH CON PERMISOS ──────────────────────────
+async function getProblematicasData() {
+  const perm   = probPermisos();
+  const instId = USUARIO_ACTUAL.institucion_id;
+  const f      = _probFiltros;
+
+  let q = sb.from('problematicas')
+    .select(`*,
+      alumno:alumnos(id,nombre,apellido,curso:cursos(id,nombre,division,nivel)),
+      registrado_por_usuario:usuarios!problematicas_registrado_por_fkey(id,nombre_completo),
+      responsable:usuarios!problematicas_responsable_id_fkey(id,nombre_completo)`)
+    .eq('institucion_id', instId);
+
+  // Filtro estado
+  if (f.estado === 'activas')    q = q.in('estado', ['abierta','en_seguimiento']);
+  else if (f.estado !== 'todas') q = q.eq('estado', f.estado);
+
+  // Filtro urgencia y nivel
+  if (f.urgencia !== 'todas') q = q.eq('urgencia', f.urgencia);
+  if (f.nivel    !== 'todos') q = q.eq('nivel',    f.nivel);
+
+  // Filtro por rol
+  if (perm.soloPropias) {
+    q = q.eq('registrado_por', USUARIO_ACTUAL.id);
+  } else if (perm.soloCursos) {
+    const cursosIds = USUARIO_ACTUAL.cursos_ids || [];
+    if (!cursosIds.length) return { data: [] };
+    const { data: als } = await sb.from('alumnos').select('id').in('curso_id', cursosIds);
+    const alumnoIds = (als || []).map(a => a.id);
+    if (!alumnoIds.length) return { data: [] };
+    q = q.in('alumno_id', alumnoIds);
+  }
+
+  q = q.order('urgencia', { ascending: false }).order('created_at', { ascending: false });
+  return q;
+}
+
+// ─── ENTRADA PRINCIPAL ────────────────────────────────
 async function rProb() {
   showLoading('prob');
   try {
-    const { data, error } = await sb
-      .from('problematicas')
-      .select(`*, alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division)),
-               registrado_por_usuario:usuarios!problematicas_registrado_por_fkey(nombre_completo)`)
-      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-      .neq('estado','resuelta')
-      .order('urgencia', { ascending: false })
-      .order('created_at', { ascending: false });
-
+    const q              = await getProblematicasData();
+    const { data, error } = await q;
     if (error) throw error;
-    window._probCache = data || [];
 
-    const abiertas = data.filter(p => p.estado === 'abierta').length;
-    const enSeg    = data.filter(p => p.estado === 'en_seguimiento').length;
+    // Preceptor: filtrar confidenciales donde no es responsable
+    let lista = data || [];
+    if (USUARIO_ACTUAL.rol === 'preceptor') {
+      lista = lista.filter(p => !p.confidencial || p.responsable_id === USUARIO_ACTUAL.id);
+    }
+    window._probCache = lista;
+
+    const abiertas = lista.filter(p => p.estado === 'abierta').length;
+    const enSeg    = lista.filter(p => p.estado === 'en_seguimiento').length;
+    const cerradas = lista.filter(p => p.estado === 'cerrada' || p.estado === 'resuelta' || p.estado === 'derivada').length;
+    const perm     = probPermisos();
 
     const c = document.getElementById('page-prob');
     c.innerHTML = `
@@ -27,191 +103,556 @@ async function rProb() {
       <div class="metrics m3">
         <div class="mc"><div class="mc-v" style="color:var(--rojo)">${abiertas}</div><div class="mc-l">Sin atender</div></div>
         <div class="mc"><div class="mc-v" style="color:var(--ambar)">${enSeg}</div><div class="mc-l">En seguimiento</div></div>
-        <div class="mc"><div class="mc-v" style="color:var(--verde)">${data.filter(p=>p.estado==='derivada').length}</div><div class="mc-l">Derivadas</div></div>
+        <div class="mc"><div class="mc-v" style="color:var(--verde)">${cerradas}</div><div class="mc-l">Cerradas</div></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="sec-lb" style="margin:0">Casos activos</div>
-        <button class="btn-p" onclick="mostrarFormProb()">+ Registrar situación</button>
+        <div class="sec-lb" style="margin:0">Filtros</div>
+        ${perm.crear ? '<button class="btn-p" onclick="mostrarFormProb()">+ Registrar situación</button>' : ''}
       </div>
-      <div id="prob-lista">${renderListaProb(data || [])}</div>
+      ${renderFiltrosProb()}
+      <div id="prob-lista" style="margin-top:10px">${renderListaProb(lista)}</div>
       <div id="form-prob"></div>`;
 
-  } catch (e) { showError('prob','Error: ' + e.message); }
+  } catch(e) { showError('prob', 'Error: ' + e.message); }
 }
 
+// ─── FILTROS ──────────────────────────────────────────
+function renderFiltrosProb() {
+  const f = _probFiltros;
+  const chip = (campo, val, lbl, extra = '') => {
+    const on = f[campo] === val;
+    return `<div class="chip${on ? ' on' : ''}" style="${on ? '' : extra}" onclick="setFiltroProb('${campo}','${val}')">${lbl}</div>`;
+  };
+  return `
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="chip-row">
+        ${chip('estado','activas','Activas')}
+        ${chip('estado','abierta','Sin atender')}
+        ${chip('estado','en_seguimiento','Seguimiento')}
+        ${chip('estado','cerrada','Cerradas')}
+        ${chip('estado','todas','Todas')}
+      </div>
+      <div class="chip-row">
+        ${chip('urgencia','todas','Todas')}
+        ${chip('urgencia','alta','Alta',   'color:var(--rojo);border-color:rgba(192,57,43,.3);background:var(--rojo-l)')}
+        ${chip('urgencia','media','Media', 'color:var(--ambar);border-color:rgba(214,137,16,.3);background:var(--amb-l)')}
+        ${chip('urgencia','baja','Baja',   'color:var(--verde);border-color:rgba(26,74,46,.3);background:var(--verde-l)')}
+      </div>
+      <div class="chip-row">
+        ${chip('nivel','todos','Todos los niveles')}
+        ${chip('nivel','inicial','Inicial')}
+        ${chip('nivel','primario','Primario')}
+        ${chip('nivel','secundario','Secundario')}
+      </div>
+    </div>`;
+}
+
+async function setFiltroProb(campo, valor) {
+  _probFiltros[campo] = valor;
+  await rProb();
+}
+
+// ─── RENDER LISTA ─────────────────────────────────────
 function renderListaProb(lista) {
-  if (!lista.length) return '<div class="empty-state">✅<br>No hay problemáticas activas</div>';
+  if (!lista.length) return '<div class="empty-state">✓<br>No hay problemáticas con los filtros aplicados</div>';
   return lista.map(p => {
-    const open = EX === 'pr-' + p.id;
-    const ini  = (p.alumno?.apellido?.[0]||'?') + (p.alumno?.nombre?.[0]||'');
-    const nom  = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
-    const cur  = p.alumno?.curso ? `${p.alumno.curso.nombre}${p.alumno.curso.division||''}` : '—';
+    const open   = EX === 'pr-' + p.id;
+    const ini    = (p.alumno?.apellido?.[0] || '?') + (p.alumno?.nombre?.[0] || '');
+    const nom    = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
+    const curso  = p.alumno?.curso;
+    const cur    = curso ? `${curso.nombre} ${curso.division || ''}`.trim() : '—';
+    const nivel  = p.nivel || curso?.nivel || '';
+    const resp   = p.responsable?.nombre_completo;
+    const urgCls = p.urgencia === 'alta' ? 'ua' : p.urgencia === 'media' ? 'um' : 'ub';
+    const urgTag = p.urgencia === 'alta' ? 'tr' : p.urgencia === 'media' ? 'ta' : 'tg';
+    const estCls = p.estado === 'abierta' ? 'tr' : p.estado === 'en_seguimiento' ? 'ta' : 'tg';
+    const estLbl = { abierta:'Sin atender', en_seguimiento:'En seguimiento', cerrada:'Cerrada', resuelta:'Cerrada', derivada:'Derivada' }[p.estado] || p.estado;
     return `
-      <div class="caso-c u${p.urgencia?.[0]||'m'}">
+      <div class="caso-c ${urgCls}">
         <div class="caso-top" onclick="togProb('pr-${p.id}')">
           <div class="av av32" style="background:var(--rojo-l);color:var(--rojo)">${ini}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:12px;font-weight:600">${nom}</div>
-            <div style="font-size:10px;color:var(--txt2)">${cur} · ${labelTipo(p.tipo)} · ${tiempoDesde(p.created_at)}</div>
+            <div style="font-size:10px;color:var(--txt2)">${cur}${nivel ? ' · ' + nivel[0].toUpperCase() + nivel.slice(1) : ''} · ${labelTipoProb(p.tipo)}</div>
+            <div style="font-size:10px;color:var(--txt3);margin-top:1px">${resp ? 'Resp: ' + resp + ' · ' : ''}${tiempoDesde(p.created_at)}</div>
             <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
-              <span class="tag ${p.urgencia==='alta'?'tr':p.urgencia==='media'?'ta':'tg'}">Urgencia ${p.urgencia}</span>
-              <span class="tag ${labelEstadoCls(p.estado)}">${labelEstado(p.estado)}</span>
-              ${p.confidencial?'<span class="tag td">Confidencial</span>':''}
+              <span class="tag ${urgTag}">Urgencia ${p.urgencia}</span>
+              <span class="tag ${estCls}">${estLbl}</span>
+              ${p.confidencial ? '<span class="tag td">Confidencial</span>' : ''}
             </div>
           </div>
-          <span style="font-size:11px;color:var(--txt2)">${open?'▲':'▼'}</span>
+          <span style="font-size:11px;color:var(--txt2)">${open ? '▲' : '▼'}</span>
         </div>
         ${open ? `<div id="det-${p.id}" class="caso-det"><div class="loading-state small"><div class="spinner"></div></div></div>` : ''}
       </div>`;
   }).join('');
 }
 
+// ─── TOGGLE ───────────────────────────────────────────
 async function togProb(key) {
   togEx(key, () => {
     const lista = document.getElementById('prob-lista');
     if (lista) lista.innerHTML = renderListaProb(window._probCache || []);
   });
   if (EX === key) {
-    const probId = key.replace('pr-','');
+    const probId = key.replace('pr-', '');
     setTimeout(() => cargarDetProb(probId), 50);
   }
 }
 
+// ─── DETALLE ──────────────────────────────────────────
 async function cargarDetProb(probId) {
-  const det = document.getElementById('det-' + probId);
+  const det  = document.getElementById('det-' + probId);
   if (!det) return;
+  const prob = (window._probCache || []).find(p => p.id === probId);
+
   const { data: intvs } = await sb
     .from('intervenciones')
     .select('*, usr:usuarios!intervenciones_registrado_por_fkey(nombre_completo)')
     .eq('problematica_id', probId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: true });
 
-  const invsHTML = (intvs||[]).map(iv=>`
-    <div class="tl-it">
-      <div class="tl-d" style="background:var(--azul)"></div>
-      <div class="tl-f">${formatFechaCorta(iv.created_at)}</div>
-      <div><div class="tl-t">${iv.titulo}</div><div class="tl-ds">${iv.descripcion}</div>
-      ${iv.proximo_paso?`<div style="font-size:10px;color:var(--verde);font-weight:500;margin-top:2px">→ ${iv.proximo_paso}</div>`:''}
-      <div style="font-size:10px;color:var(--txt3)">${iv.usr?.nombre_completo||'—'}</div></div>
-    </div>`).join('') || '<div style="font-size:11px;color:var(--txt2)">Sin intervenciones registradas.</div>';
+  const perm     = probPermisos();
+  const puedeSeg = puedeAgregarSeg(prob);
+  const cerrada  = prob?.estado === 'cerrada' || prob?.estado === 'resuelta' || prob?.estado === 'derivada';
+
+  const dotColor = t => t === 'Caso cerrado' ? 'var(--verde)' : t === 'Caso reabierto' ? 'var(--ambar)' : 'var(--azul)';
+  const invsHTML = (intvs || []).length
+    ? intvs.map(iv => `
+        <div class="tl-it">
+          <div class="tl-d" style="background:${dotColor(iv.titulo)}"></div>
+          <div class="tl-f">${formatFechaCorta(iv.created_at)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="tl-t">${iv.titulo}</div>
+            <div class="tl-ds">${iv.descripcion}</div>
+            ${iv.proximo_paso ? `<div style="font-size:10px;color:var(--verde);font-weight:500;margin-top:2px">→ ${iv.proximo_paso}</div>` : ''}
+            <div style="font-size:10px;color:var(--txt3);margin-top:2px">${iv.usr?.nombre_completo || '—'}</div>
+          </div>
+        </div>`).join('')
+    : '<div style="font-size:11px;color:var(--txt2);padding:4px 0">Sin intervenciones aún.</div>';
 
   det.innerHTML = `
     <div style="padding:12px 14px">
-      <div style="font-size:11px;color:var(--txt2);margin-bottom:10px;line-height:1.5">${(window._probCache||[]).find(p=>p.id===probId)?.descripcion||''}</div>
-      <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Intervenciones</div>
+      ${prob?.descripcion ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5;padding:8px 10px;background:var(--surf);border-radius:var(--rad);margin-bottom:10px">${prob.descripcion}</div>` : ''}
+      ${cerrada && prob?.motivo_cierre ? `<div style="background:var(--verde-l);border-radius:var(--rad);padding:8px 10px;margin-bottom:10px;font-size:11px"><span style="font-weight:600;color:var(--verde)">Cerrada</span> · ${prob.motivo_cierre}${prob.cerrado_at ? ' · ' + formatFechaLatam(prob.cerrado_at.split('T')[0]) : ''}</div>` : ''}
+
+      <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora de seguimiento</div>
       ${invsHTML}
+
+      ${puedeSeg && !cerrada ? `
       <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
-        <input type="text" id="it-${probId}" placeholder="Título de la intervención" style="margin-bottom:6px">
-        <textarea id="id-${probId}" rows="2" placeholder="Descripción..."></textarea>
-        <input type="text" id="ip-${probId}" placeholder="Próximo paso (opcional)" style="margin-top:6px;margin-bottom:8px">
-        <div class="acc">
-          <button class="btn-p" style="font-size:11px" onclick="guardarInterv('${probId}')">Guardar intervención</button>
-          <button class="btn-d" style="font-size:11px" onclick="cambiarEstProb('${probId}','resuelta')">Cerrar caso ✓</button>
+        <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento</div>
+        <textarea id="id-${probId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
+        <input type="text" id="ip-${probId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
+        <div class="acc" style="margin-top:8px">
+          <button class="btn-p" style="font-size:11px" onclick="guardarSeguimiento('${probId}')">Guardar</button>
         </div>
+      </div>` : ''}
+
+      <div class="acc" style="margin-top:10px;border-top:1px solid var(--brd);padding-top:10px">
+        ${perm.cerrar && !cerrada ? `<button class="btn-d" style="font-size:11px" onclick="mostrarFormCierre('${probId}')">Cerrar caso</button>` : ''}
+        ${perm.reabrir && cerrada ? `<button class="btn-s" style="font-size:11px" onclick="reabrirProb('${probId}')">Reabrir caso</button>` : ''}
+      </div>
+      <div id="cierre-form-${probId}"></div>
+    </div>`;
+}
+
+// ─── SEGUIMIENTO ──────────────────────────────────────
+async function guardarSeguimiento(probId) {
+  const d = document.getElementById('id-' + probId)?.value.trim();
+  const p = document.getElementById('ip-' + probId)?.value.trim();
+  if (!d) { alert('Describí la acción tomada.'); return; }
+  const { error } = await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Seguimiento',
+    descripcion:     d,
+    proximo_paso:    p || null,
+    tipo:            'otro',
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('problematicas')
+    .update({ estado: 'en_seguimiento', updated_at: new Date().toISOString() })
+    .eq('id', probId);
+  await rProb();
+}
+
+// ─── CIERRE ───────────────────────────────────────────
+function mostrarFormCierre(probId) {
+  const fc = document.getElementById('cierre-form-' + probId);
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  fc.innerHTML = `
+    <div style="margin-top:10px;padding:12px;background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad)">
+      <div style="font-size:11px;font-weight:600;margin-bottom:8px">Motivo de cierre</div>
+      <div class="chip-row" id="motivos-${probId}">
+        ${['Resuelta','Derivada externamente','Sin resolución','Archivo'].map((m, i) =>
+          `<div class="chip${i === 0 ? ' on' : ''}" onclick="selChipRow(this,'motivos-${probId}')">${m}</div>`
+        ).join('')}
+      </div>
+      <div class="acc" style="margin-top:10px">
+        <button class="btn-d" style="font-size:11px" onclick="confirmarCierreProb('${probId}')">Confirmar cierre</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('cierre-form-${probId}').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
 }
 
-async function guardarInterv(probId) {
-  const t = document.getElementById('it-'+probId)?.value.trim();
-  const d = document.getElementById('id-'+probId)?.value.trim();
-  const p = document.getElementById('ip-'+probId)?.value.trim();
-  if (!t||!d) { alert('Completá título y descripción.'); return; }
-  const {error} = await sb.from('intervenciones').insert({
-    problematica_id:probId, registrado_por:USUARIO_ACTUAL.id,
-    titulo:t, descripcion:d, proximo_paso:p||null, tipo:'otro'
+function selChipRow(el, rowId) {
+  document.getElementById(rowId)?.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+async function confirmarCierreProb(probId) {
+  const el     = document.querySelector(`#motivos-${probId} .chip.on`);
+  const motivo = el?.textContent || 'Resuelta';
+  const { error } = await sb.from('problematicas').update({
+    estado:        'cerrada',
+    motivo_cierre: motivo,
+    cerrado_por:   USUARIO_ACTUAL.id,
+    cerrado_at:    new Date().toISOString(),
+    updated_at:    new Date().toISOString(),
+  }).eq('id', probId);
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Caso cerrado',
+    descripcion:     `Motivo: ${motivo}`,
+    tipo:            'otro',
   });
-  if (error) { alert('Error: '+error.message); return; }
-  await sb.from('problematicas').update({estado:'en_seguimiento',updated_at:new Date().toISOString()}).eq('id',probId);
   await rProb();
 }
 
-async function cambiarEstProb(probId, estado) {
-  await sb.from('problematicas').update({estado,updated_at:new Date().toISOString()}).eq('id',probId);
+// ─── REABRIR ──────────────────────────────────────────
+async function reabrirProb(probId) {
+  const { error } = await sb.from('problematicas').update({
+    estado:        'en_seguimiento',
+    reabierto_por: USUARIO_ACTUAL.id,
+    reabierto_at:  new Date().toISOString(),
+    updated_at:    new Date().toISOString(),
+  }).eq('id', probId);
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Caso reabierto',
+    descripcion:     `Reabierto por ${USUARIO_ACTUAL.nombre_completo}`,
+    tipo:            'otro',
+  });
   await rProb();
 }
 
-function mostrarFormProb() {
+// ─── FORMULARIO NUEVA PROBLEMÁTICA ────────────────────
+async function mostrarFormProb() {
   const fc = document.getElementById('form-prob');
-  if (fc.innerHTML) { fc.innerHTML=''; return; }
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+
+  const { data: usuarios } = await sb.from('usuarios')
+    .select('id,nombre_completo,rol')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('activo', true)
+    .in('rol', ['eoe','preceptor','director_general','directivo_nivel'])
+    .order('nombre_completo');
+
+  const responsablesOpts = (usuarios || []).map(u =>
+    `<option value="${u.id}">${u.nombre_completo} (${labelRol(u.rol)})</option>`
+  ).join('');
+
   fc.innerHTML = `
     <div class="card" style="margin-top:14px">
       <div style="font-size:14px;font-weight:600;margin-bottom:14px">Registrar nueva situación</div>
-      <div class="sec-lb">Alumno</div>
-      <input type="text" id="pb-busq" placeholder="Apellido del alumno..." oninput="buscarAlProb(this.value)">
-      <div id="pb-res"></div><input type="hidden" id="pb-id">
+
+      <div class="sec-lb">Nivel</div>
+      <select id="pb-nivel" onchange="onNivelProbChange(this.value)">
+        <option value="">— Seleccioná nivel —</option>
+        <option value="inicial">Inicial</option>
+        <option value="primario">Primario</option>
+        <option value="secundario">Secundario</option>
+      </select>
+
+      <div class="sec-lb" style="margin-top:10px">Curso</div>
+      <select id="pb-curso" onchange="onCursoProbChange(this.value)" disabled>
+        <option value="">— Primero seleccioná nivel —</option>
+      </select>
+
+      <div class="sec-lb" style="margin-top:10px">
+        Alumno/s <span style="font-weight:400;color:var(--txt3)">(podés seleccionar más de uno)</span>
+      </div>
+      <div id="pb-al-lista" style="border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf2);min-height:44px;max-height:200px;overflow-y:auto">
+        <div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>
+      </div>
+      <div id="pb-al-sel" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>
+
       <div class="sec-lb" style="margin-top:10px">Tipo</div>
       <div class="chip-row" id="pb-tipo">
-        ${['convivencia','emocional','familiar','aprendizaje','salud','conducta'].map((t,i)=>
-          `<div class="chip${i===0?' on':''}" onclick="document.querySelectorAll('#pb-tipo .chip').forEach(c=>c.classList.remove('on'));this.classList.add('on')">${labelTipo(t)}</div>`
+        ${TIPOS_LABEL_PROB.map((t, i) =>
+          `<div class="chip${i === 0 ? ' on' : ''}" onclick="selChipRow(this,'pb-tipo')">${t}</div>`
         ).join('')}
       </div>
+
       <div class="sec-lb" style="margin-top:10px">Urgencia</div>
       <div class="urg-row">
         <div class="urg-b ua" data-u="alta"  onclick="selUrgProb(this)">Alta</div>
         <div class="urg-b um" data-u="media" onclick="selUrgProb(this)">Media</div>
         <div class="urg-b"   data-u="baja"  onclick="selUrgProb(this)">Baja</div>
       </div>
+
       <div class="sec-lb" style="margin-top:10px">Descripción</div>
-      <textarea id="pb-desc" rows="3" placeholder="Describí lo observado..."></textarea>
+      <textarea id="pb-desc" rows="3" placeholder="Describí la situación observada..."></textarea>
+
+      <div class="sec-lb" style="margin-top:10px">Responsable de seguimiento</div>
+      <select id="pb-resp">
+        <option value="">— Sin asignar —</option>
+        ${responsablesOpts}
+      </select>
+
       <div class="toggle-row-ui" style="margin-top:10px">
-        <div><div style="font-size:12px;font-weight:500">Notificar al EOE</div><div style="font-size:10px;color:var(--txt2)">Alerta inmediata</div></div>
-        <div class="tog on" id="pb-eoe" onclick="this.classList.toggle('on');this.classList.toggle('off')"><div class="tog-thumb"></div></div>
+        <div>
+          <div style="font-size:12px;font-weight:500">Confidencial</div>
+          <div style="font-size:10px;color:var(--txt2)">Solo visible para EOE y directivos</div>
+        </div>
+        <div class="tog on" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')">
+          <div class="tog-thumb"></div>
+        </div>
       </div>
-      <div class="toggle-row-ui" style="margin-top:8px">
-        <div><div style="font-size:12px;font-weight:500">Confidencial</div><div style="font-size:10px;color:var(--txt2)">Solo EOE y directivos</div></div>
-        <div class="tog on" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')"><div class="tog-thumb"></div></div>
-      </div>
+
       <div class="acc" style="margin-top:14px">
-        <button class="btn-p" onclick="guardarProb()">Registrar y notificar</button>
+        <button class="btn-p" id="btn-guardar-prob" onclick="guardarProb()">Registrar y notificar</button>
         <button class="btn-s" onclick="document.getElementById('form-prob').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
+
+  window._alumnosSelProb = [];
+}
+
+async function onNivelProbChange(nivel) {
+  const cursosEl = document.getElementById('pb-curso');
+  const listaEl  = document.getElementById('pb-al-lista');
+  window._alumnosSelProb = [];
+  document.getElementById('pb-al-sel').innerHTML = '';
+
+  if (!nivel) {
+    cursosEl.innerHTML = '<option value="">— Primero seleccioná nivel —</option>';
+    cursosEl.disabled = true;
+    listaEl.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>';
+    return;
+  }
+
+  cursosEl.innerHTML = '<option>Cargando...</option>';
+  cursosEl.disabled  = true;
+
+  const { data } = await sb.from('cursos')
+    .select('id,nombre,division')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('nivel', nivel)
+    .order('nombre');
+
+  cursosEl.innerHTML = '<option value="">— Seleccioná curso —</option>' +
+    (data || []).map(c => `<option value="${c.id}">${c.nombre} ${c.division || ''}</option>`).join('');
+  cursosEl.disabled  = false;
+  listaEl.innerHTML  = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso</div>';
+}
+
+async function onCursoProbChange(cursoId) {
+  const listaEl = document.getElementById('pb-al-lista');
+  window._alumnosSelProb = [];
+  document.getElementById('pb-al-sel').innerHTML = '';
+
+  if (!cursoId) {
+    listaEl.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso</div>';
+    return;
+  }
+  listaEl.innerHTML = '<div class="loading-state small"><div class="spinner"></div></div>';
+
+  const { data } = await sb.from('alumnos')
+    .select('id,nombre,apellido')
+    .eq('curso_id', cursoId)
+    .eq('activo', true)
+    .order('apellido');
+
+  if (!data?.length) {
+    listaEl.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Sin alumnos en este curso</div>';
+    return;
+  }
+  listaEl.innerHTML = data.map(a => {
+    const nombre = (a.apellido + ', ' + a.nombre).replace(/'/g, '&apos;');
+    return `
+      <div id="al-opt-${a.id}" onclick="toggleAlumnoSel('${a.id}','${nombre}',this)"
+        style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .1s">
+        <div id="chk-${a.id}" style="width:15px;height:15px;border-radius:3px;border:1.5px solid var(--brd);flex-shrink:0;display:flex;align-items:center;justify-content:center"></div>
+        <span style="font-size:11px">${a.apellido}, ${a.nombre}</span>
+      </div>`;
+  }).join('');
+}
+
+function toggleAlumnoSel(alumnoId, nombre, rowEl) {
+  if (!window._alumnosSelProb) window._alumnosSelProb = [];
+  const idx = window._alumnosSelProb.findIndex(a => a.id === alumnoId);
+  const chk = document.getElementById('chk-' + alumnoId);
+  const row = document.getElementById('al-opt-' + alumnoId);
+  if (idx >= 0) {
+    window._alumnosSelProb.splice(idx, 1);
+    if (chk) { chk.style.background = ''; chk.style.borderColor = 'var(--brd)'; chk.innerHTML = ''; }
+    if (row) row.style.background = '';
+  } else {
+    window._alumnosSelProb.push({ id: alumnoId, nombre });
+    if (chk) {
+      chk.style.background = 'var(--verde)';
+      chk.style.borderColor = 'var(--verde)';
+      chk.innerHTML = '<svg width="9" height="7" viewBox="0 0 9 7"><path d="M1 3.5l2.5 2L8 1" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (row) row.style.background = 'var(--verde-p)';
+  }
+  const selEl = document.getElementById('pb-al-sel');
+  selEl.innerHTML = window._alumnosSelProb.map(a =>
+    `<span class="tag tg" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px"
+      onclick="toggleAlumnoSel('${a.id}','${a.nombre}',null)">
+      ${a.nombre} <b style="font-size:13px;line-height:1;font-weight:400">×</b>
+    </span>`
+  ).join('');
 }
 
 function selUrgProb(el) {
-  el.closest('.urg-row').querySelectorAll('.urg-b').forEach(b=>b.className='urg-b');
+  el.closest('.urg-row').querySelectorAll('.urg-b').forEach(b => b.className = 'urg-b');
   el.className = 'urg-b u' + el.dataset.u[0];
 }
 
-async function buscarAlProb(q) {
-  const res = document.getElementById('pb-res');
-  if (q.length < 2) { res.innerHTML=''; return; }
-  const {data} = await sb.from('alumnos').select('id,nombre,apellido,curso:cursos(nombre,division)')
-    .eq('institucion_id',USUARIO_ACTUAL.institucion_id)
-    .or(`apellido.ilike.%${q}%,nombre.ilike.%${q}%`).limit(5);
-  res.innerHTML = (data||[]).map(a=>`
-    <div class="busqueda-resultado" onclick="document.getElementById('pb-id').value='${a.id}';document.getElementById('pb-busq').value='${a.apellido}, ${a.nombre}';document.getElementById('pb-res').innerHTML=''">
-      ${a.apellido}, ${a.nombre} · ${a.curso?.nombre||''}${a.curso?.division||''}
-    </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:6px">Sin resultados</div>';
-}
-
 async function guardarProb() {
-  const alumnoId = document.getElementById('pb-id')?.value;
-  const desc     = document.getElementById('pb-desc')?.value.trim();
-  const tipoEl   = document.querySelector('#pb-tipo .chip.on');
-  const urgEl    = document.querySelector('.urg-b.ua,.urg-b.um,.urg-b.ub');
-  const eoe      = document.getElementById('pb-eoe')?.classList.contains('on');
-  const conf     = document.getElementById('pb-conf')?.classList.contains('on');
-  if (!alumnoId) { alert('Seleccioná un alumno.'); return; }
-  if (!desc)     { alert('Escribí una descripción.'); return; }
-  const tipo = { 'Convivencia':'convivencia','Emocional':'emocional','Familiar':'familiar','Aprendizaje':'aprendizaje','Salud':'salud','Conducta':'conducta' }[tipoEl?.textContent] || 'otro';
+  const nivel  = document.getElementById('pb-nivel')?.value || null;
+  const desc   = document.getElementById('pb-desc')?.value.trim();
+  const tipoEl = document.querySelector('#pb-tipo .chip.on');
+  const urgEl  = document.querySelector('.urg-b.ua, .urg-b.um, .urg-b.ub');
+  const conf   = document.getElementById('pb-conf')?.classList.contains('on');
+  const respId = document.getElementById('pb-resp')?.value || null;
+  const alumnos = window._alumnosSelProb || [];
+
+  if (!alumnos.length) { alert('Seleccioná al menos un alumno.'); return; }
+  if (!desc)           { alert('Escribí una descripción.'); return; }
+
+  const tipo = TIPOS_VALOR_PROB[tipoEl?.textContent?.trim()] || 'otros';
   const urg  = urgEl?.dataset.u || 'media';
-  const {data:nueva,error} = await sb.from('problematicas').insert({
-    institucion_id:USUARIO_ACTUAL.institucion_id, alumno_id:alumnoId,
-    registrado_por:USUARIO_ACTUAL.id, tipo, urgencia:urg, descripcion:desc,
-    notificar_eoe:eoe, confidencial:conf, estado:'abierta'
-  }).select().single();
-  if (error) { alert('Error: '+error.message); return; }
-  if (eoe) {
-    const {data:eoeUs} = await sb.from('usuarios').select('id').eq('institucion_id',USUARIO_ACTUAL.institucion_id).eq('rol','eoe');
-    if (eoeUs?.length) await sb.from('notificaciones').insert(eoeUs.map(u=>({
-      usuario_id:u.id, tipo:'nueva_problematica', titulo:'Nueva problemática registrada',
-      descripcion:`Registrado por ${USUARIO_ACTUAL.nombre_completo}`,
-      referencia_id:nueva.id, referencia_tabla:'problematicas'
-    })));
+
+  const btn = document.getElementById('btn-guardar-prob');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  for (const alumno of alumnos) {
+    const { data: nueva, error } = await sb.from('problematicas').insert({
+      institucion_id: USUARIO_ACTUAL.institucion_id,
+      alumno_id:      alumno.id,
+      registrado_por: USUARIO_ACTUAL.id,
+      tipo,
+      urgencia:       urg,
+      descripcion:    desc,
+      confidencial:   conf,
+      responsable_id: respId || null,
+      nivel,
+      estado:         'abierta',
+    }).select().single();
+    if (error) {
+      alert('Error al guardar: ' + error.message);
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar y notificar'; }
+      return;
+    }
+    await crearAlertasProb(nueva.id, urg, nivel);
   }
-  document.getElementById('form-prob').innerHTML='';
+
+  document.getElementById('form-prob').innerHTML = '';
+  window._alumnosSelProb = [];
   await rProb();
   cargarNotificaciones();
 }
+
+// ─── ALERTAS AUTOMÁTICAS ──────────────────────────────
+async function crearAlertasProb(probId, urgencia, nivel) {
+  const instId = USUARIO_ACTUAL.institucion_id;
+  let dests = [];
+
+  // EOE: urgencia media o alta
+  if (urgencia === 'alta' || urgencia === 'media') {
+    const { data: eoe } = await sb.from('usuarios').select('id')
+      .eq('institucion_id', instId).eq('rol', 'eoe').eq('activo', true);
+    dests.push(...(eoe || []).map(u => u.id));
+  }
+
+  // Directivos: solo urgencia alta
+  if (urgencia === 'alta') {
+    let q = sb.from('usuarios').select('id')
+      .eq('institucion_id', instId).eq('activo', true)
+      .in('rol', ['director_general','directivo_nivel']);
+    if (nivel) q = q.eq('nivel', nivel);
+    const { data: dirs } = await q;
+    dests.push(...(dirs || []).map(u => u.id));
+  }
+
+  dests = [...new Set(dests)].filter(id => id !== USUARIO_ACTUAL.id);
+  if (!dests.length) return;
+
+  // Tabla alertas_problematicas (si existe)
+  try {
+    await sb.from('alertas_problematicas').insert(
+      dests.map(uid => ({ problematica_id: probId, usuario_id: uid }))
+    );
+  } catch(_) {}
+
+  // Notificaciones (siempre)
+  const urgLabel = urgencia === 'alta' ? 'URGENTE' : 'Media';
+  await sb.from('notificaciones').insert(
+    dests.map(uid => ({
+      usuario_id:       uid,
+      tipo:             'nueva_problematica',
+      titulo:           `Urgencia ${urgLabel} — Nueva problemática`,
+      descripcion:      `Registrado por ${USUARIO_ACTUAL.nombre_completo}`,
+      referencia_id:    probId,
+      referencia_tabla: 'problematicas',
+    }))
+  );
+}
+
+// ─── INTEGRACIÓN LEGAJO ───────────────────────────────
+async function cargarProbAlumno(alumnoId, contenedorId) {
+  const cont = document.getElementById(contenedorId);
+  if (!cont) return;
+  cont.innerHTML = '<div class="loading-state small"><div class="spinner"></div></div>';
+
+  const { data } = await sb.from('problematicas')
+    .select('id,tipo,urgencia,estado,descripcion,created_at,motivo_cierre,confidencial')
+    .eq('alumno_id', alumnoId)
+    .order('created_at', { ascending: false });
+
+  const rol   = USUARIO_ACTUAL.rol;
+  const lista = (data || []).filter(p =>
+    !p.confidencial || ['director_general','directivo_nivel','eoe'].includes(rol)
+  );
+
+  if (!lista.length) {
+    cont.innerHTML = '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin problemáticas registradas.</div>';
+    return;
+  }
+
+  cont.innerHTML = lista.map(p => {
+    const urgTag = p.urgencia === 'alta' ? 'tr' : p.urgencia === 'media' ? 'ta' : 'tg';
+    const estCls = p.estado === 'abierta' ? 'tr' : p.estado === 'en_seguimiento' ? 'ta' : 'tg';
+    const estLbl = { abierta:'Sin atender', en_seguimiento:'En seguimiento', cerrada:'Cerrada', resuelta:'Cerrada', derivada:'Derivada' }[p.estado] || p.estado;
+    return `
+      <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--brd)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600">${labelTipoProb(p.tipo)}</div>
+          <div style="font-size:10px;color:var(--txt2);margin-top:1px">${formatFechaLatam(p.created_at?.split('T')[0])}</div>
+          ${p.motivo_cierre ? `<div style="font-size:10px;color:var(--txt3);margin-top:1px">${p.motivo_cierre}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0">
+          <span class="tag ${urgTag}" style="font-size:9px">Urg. ${p.urgencia}</span>
+          <span class="tag ${estCls}" style="font-size:9px">${estLbl}</span>
+          ${p.confidencial ? '<span class="tag td" style="font-size:9px">Conf.</span>' : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─── BACKWARD COMPAT ──────────────────────────────────
+async function guardarInterv(probId) { return guardarSeguimiento(probId); }
+async function cambiarEstProb(probId, estado) {
+  await sb.from('problematicas').update({ estado, updated_at: new Date().toISOString() }).eq('id', probId);
+  await rProb();
+}
+async function buscarAlProb(q) {}
