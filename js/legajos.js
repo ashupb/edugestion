@@ -2,13 +2,14 @@
 // LEGAJOS.JS — Módulo completo de legajos de alumnos
 // =====================================================
 
-let _legVista       = 'cursos';  // 'cursos' | 'alumnos' | 'legajo'
-let _legCursoSel    = null;
-let _legAlumnoSel   = null;
-let _legTab         = 0;
-let _legCursosCache = [];
-let _legAlumnosCache= [];
-let _legSemMap      = {};        // { alumnoId: 'verde'|'amarillo'|'rojo' }
+let _legVista        = 'anios';   // 'anios' | 'cursos' | 'alumnos' | 'legajo'
+let _legAnioSel      = null;
+let _legCursoSel     = null;
+let _legAlumnoSel    = null;
+let _legTab          = 0;
+let _legCursosAll    = [];         // todos los cursos (cargados una vez)
+let _legAlumnosCache = [];
+let _legSemMap       = {};
 
 const NIVEL_COL = {
   inicial:    { bg:'var(--dor-l)',   fg:'var(--dorado)', txt:'Inicial' },
@@ -16,14 +17,26 @@ const NIVEL_COL = {
   secundaria: { bg:'var(--azul-l)',  fg:'var(--azul)',   txt:'Secundaria' },
   terciaria:  { bg:'var(--rojo-l)',  fg:'var(--rojo)',   txt:'Terciaria' },
 };
-function nivCol(nivel) {
-  return NIVEL_COL[nivel?.toLowerCase()] || { bg:'var(--gris-l)', fg:'var(--gris)', txt: nivel || '—' };
+function nivCol(n) {
+  return NIVEL_COL[n?.toLowerCase()] || { bg:'var(--gris-l)', fg:'var(--gris)', txt: n || '—' };
+}
+
+// Badge del curso: extrae número de nombre + división
+// "Sala 5" + "A" → "5A" | "4°" + "B" → "4B" | "Año 1" + "A" → "1A"
+function _cursoBadge(cur) {
+  const m = (cur.nombre || '').match(/\d+/);
+  return m ? m[0] + (cur.division || '') : ((cur.nombre || '?')[0].toUpperCase() + (cur.division || ''));
+}
+
+// Ciclo lectivo del curso: usa ciclo_lectivo si existe, sino año de created_at
+function _cursoAnio(cur) {
+  return cur.ciclo_lectivo || (cur.created_at ? new Date(cur.created_at).getFullYear() : new Date().getFullYear());
 }
 
 function legPermisos() {
   const r = USUARIO_ACTUAL?.rol;
   return {
-    editarDatos:          ['director_general','directivo_nivel','admin'].includes(r),
+    editarDatos:          ['director_general','directivo_nivel','admin','preceptor'].includes(r),
     editarContactos:      ['director_general','directivo_nivel','eoe','admin','preceptor'].includes(r),
     verEOE:               ['eoe','director_general','directivo_nivel','admin'].includes(r),
     agregarEOE:           r === 'eoe',
@@ -34,29 +47,86 @@ function legPermisos() {
   };
 }
 
-// ── ENTRADA PRINCIPAL ─────────────────────────────────
+// Helper: buscar nombres de usuarios por IDs (evita FK joins problemáticos)
+async function _fetchUserNames(ids) {
+  if (!ids || !ids.length) return {};
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return {};
+  const { data } = await sb.from('usuarios')
+    .select('id,nombre_completo')
+    .in('id', uniqueIds);
+  return Object.fromEntries((data || []).map(u => [u.id, u.nombre_completo]));
+}
+
+// ── VISTA 1: SELECCIÓN DE AÑO LECTIVO ────────────────
 async function rLeg() {
   showLoading('leg');
   inyectarEstilosLeg();
   try {
     const { data, error } = await sb.from('cursos')
-      .select('id,nombre,division,nivel,anio')
+      .select('id,nombre,division,nivel,anio,ciclo_lectivo,created_at')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-      .order('nivel').order('anio').order('division');
-    if (error) throw error;
-    _legCursosCache = data || [];
-    _legVista = 'cursos';
-    _legCursoSel = null;
-    _legAlumnoSel = null;
-    _renderLegCursos();
-  } catch(e) { showError('leg', 'Error cargando cursos: ' + e.message); }
+      .order('nivel').order('nombre').order('division');
+
+    // Si ciclo_lectivo no existe aún (schema viejo), reintenta sin ese campo
+    if (error && (error.code === 'PGRST200' || error.message?.includes('ciclo_lectivo'))) {
+      const { data: d2, error: e2 } = await sb.from('cursos')
+        .select('id,nombre,division,nivel,anio,created_at')
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .order('nivel').order('nombre').order('division');
+      if (e2) throw e2;
+      _legCursosAll = d2 || [];
+    } else {
+      if (error) throw error;
+      _legCursosAll = data || [];
+    }
+
+    const anios = [...new Set(_legCursosAll.map(_cursoAnio))].sort((a, b) => b - a);
+    _legVista = 'anios';
+    _legAnioSel = anios[0] || new Date().getFullYear();
+    _renderLegAnios(anios);
+  } catch(e) { showError('leg', 'Error: ' + e.message); }
 }
 
+function _renderLegAnios(anios) {
+  const c = document.getElementById('page-leg');
+  if (!anios || !anios.length) {
+    c.innerHTML = `
+      <div class="pg-t">Legajos</div>
+      <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''}</div>
+      <div class="empty-state">▤<br>Sin cursos registrados</div>`;
+    return;
+  }
+
+  const cards = anios.map(a => `
+    <div class="leg-anio-card" onclick="_abrirAnioLeg(${a})">
+      <div class="leg-anio-num">${a}</div>
+      <div style="font-size:10px;color:var(--txt2)">Ciclo lectivo</div>
+      <div style="font-size:11px;color:var(--verde);margin-top:4px">
+        ${_legCursosAll.filter(c => _cursoAnio(c) === a).length} cursos
+      </div>
+      <div class="leg-curso-arrow">›</div>
+    </div>`).join('');
+
+  c.innerHTML = `
+    <div class="pg-t">Legajos</div>
+    <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''} · Seleccioná el año lectivo</div>
+    <div class="leg-anios-grid" style="margin-top:16px">${cards}</div>`;
+}
+
+function _abrirAnioLeg(anio) {
+  _legAnioSel = anio;
+  _legVista = 'cursos';
+  _renderLegCursos();
+}
+
+// ── VISTA 2: CURSOS DEL AÑO, AGRUPADOS POR NIVEL ─────
 function _renderLegCursos() {
   const c = document.getElementById('page-leg');
+  const cursos = _legCursosAll.filter(cur => _cursoAnio(cur) === _legAnioSel);
 
   const porNivel = {};
-  _legCursosCache.forEach(cur => {
+  cursos.forEach(cur => {
     const niv = cur.nivel || 'sin nivel';
     if (!porNivel[niv]) porNivel[niv] = [];
     porNivel[niv].push(cur);
@@ -64,30 +134,34 @@ function _renderLegCursos() {
 
   const html = Object.entries(porNivel).map(([nivel, lista]) => {
     const nc = nivCol(nivel);
-    const cards = lista.map(cur => `
-      <div class="leg-curso-card" onclick="abrirCursoLeg('${cur.id}')">
-        <div class="leg-curso-badge" style="background:${nc.bg};color:${nc.fg}">
-          ${cur.anio || ''}°${cur.division || ''}
-        </div>
-        <div class="leg-curso-nombre">${cur.nombre}</div>
-        <div class="leg-curso-arrow">›</div>
-      </div>`).join('');
+    const cards = lista.map(cur => {
+      const badge = _cursoBadge(cur);
+      return `
+        <div class="leg-curso-card" onclick="abrirCursoLeg('${cur.id}')">
+          <div class="leg-curso-badge" style="background:${nc.bg};color:${nc.fg}">${badge}</div>
+          <div class="leg-curso-nombre">${cur.nombre} ${cur.division || ''}</div>
+          <div class="leg-curso-arrow">›</div>
+        </div>`;
+    }).join('');
     return `
       <div style="margin-bottom:18px">
         <div class="leg-nivel-header" style="color:${nc.fg}">${nc.txt}</div>
         <div class="leg-cursos-grid">${cards}</div>
       </div>`;
-  }).join('') || '<div class="empty-state">▤<br>Sin cursos registrados</div>';
+  }).join('') || '<div class="empty-state">▤<br>Sin cursos para este año</div>';
 
   c.innerHTML = `
-    <div class="pg-t">Legajos</div>
-    <div class="pg-s">Seleccioná un curso · ${INSTITUCION_ACTUAL?.nombre || ''}</div>
-    <div style="margin-top:16px">${html}</div>`;
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <button class="btn-ghost" onclick="rLeg()">‹ Años lectivos</button>
+    </div>
+    <div class="pg-t">Año lectivo ${_legAnioSel}</div>
+    <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''} · Seleccioná un curso</div>
+    <div style="margin-top:12px">${html}</div>`;
 }
 
-// ── LISTA DE ALUMNOS POR CURSO ────────────────────────
+// ── VISTA 3: ALUMNOS DEL CURSO ────────────────────────
 async function abrirCursoLeg(cursoId) {
-  const cur = _legCursosCache.find(c => c.id === cursoId);
+  const cur = _legCursosAll.find(c => c.id === cursoId);
   if (!cur) return;
   _legCursoSel = cur;
   _legVista = 'alumnos';
@@ -118,16 +192,16 @@ async function _cargarSemaforos(ids) {
       .in('alumno_id', ids)
       .in('estado', ['abierta','en_seguimiento']);
     (data || []).forEach(p => {
-      const actual = _legSemMap[p.alumno_id];
+      const cur = _legSemMap[p.alumno_id];
       if (p.urgencia === 'alta') {
         _legSemMap[p.alumno_id] = 'rojo';
-      } else if (p.urgencia === 'media' && actual !== 'rojo') {
+      } else if (p.urgencia === 'media' && cur !== 'rojo') {
         _legSemMap[p.alumno_id] = 'amarillo';
-      } else if (!actual) {
+      } else if (!cur) {
         _legSemMap[p.alumno_id] = 'verde';
       }
     });
-  } catch(e) { /* sin problematicas, todo verde */ }
+  } catch(e) { /* sin problematicas — todo verde */ }
   ids.forEach(id => { if (!_legSemMap[id]) _legSemMap[id] = 'verde'; });
 }
 
@@ -138,7 +212,7 @@ function _semClr(sem) {
 function _renderLegAlumnos() {
   const c  = document.getElementById('page-leg');
   const nc = nivCol(_legCursoSel?.nivel);
-  const alumnos = _legAlumnosCache;
+  const alumnos  = _legAlumnosCache;
   const rojos    = alumnos.filter(a => _legSemMap[a.id] === 'rojo').length;
   const amarillos= alumnos.filter(a => _legSemMap[a.id] === 'amarillo').length;
 
@@ -157,11 +231,13 @@ function _renderLegAlumnos() {
       </div>`;
   }).join('') || '<div class="empty-state" style="padding:24px">◎<br>Sin alumnos en este curso</div>';
 
+  const badge = _cursoBadge(_legCursoSel);
   c.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <button class="btn-ghost" onclick="_renderLegCursos()">‹ ${_legAnioSel}</button>
+    </div>
     <div class="pg-t">${_legCursoSel.nombre} ${_legCursoSel.division || ''}</div>
     <div class="pg-s" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button class="btn-ghost" onclick="rLeg()">‹ Cursos</button>
-      <span style="color:var(--txt3)">·</span>
       <span style="background:${nc.bg};color:${nc.fg};padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600">${nc.txt}</span>
     </div>
     <div class="metrics m2" style="margin-top:12px;margin-bottom:12px">
@@ -171,7 +247,7 @@ function _renderLegAlumnos() {
     <div class="card" style="padding:0">${rows}</div>`;
 }
 
-// ── LEGAJO INDIVIDUAL ─────────────────────────────────
+// ── VISTA 4: LEGAJO INDIVIDUAL (TABS) ─────────────────
 const LEG_TABS = [
   { id:'datos',         label:'Datos' },
   { id:'contactos',     label:'Contactos' },
@@ -200,7 +276,7 @@ async function abrirLegajoAlumno(alumnoId) {
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-      <button class="btn-ghost" onclick="abrirCursoLeg('${_legCursoSel?.id}')">‹ ${_legCursoSel?.nombre || ''}</button>
+      <button class="btn-ghost" onclick="_renderLegAlumnos()">‹ ${_legCursoSel?.nombre || ''} ${_legCursoSel?.division || ''}</button>
     </div>
 
     <div class="card leg-header-card">
@@ -256,7 +332,9 @@ async function _tabDatos(c) {
   const p = legPermisos();
   let obs_fam = '';
   try {
-    const { data } = await sb.from('alumnos').select('observaciones_familiares').eq('id', a.id).single();
+    const { data } = await sb.from('alumnos')
+      .select('observaciones_familiares')
+      .eq('id', a.id).single();
     obs_fam = data?.observaciones_familiares || '';
   } catch(e) {}
 
@@ -275,16 +353,18 @@ async function _tabDatos(c) {
         ${p.editarDatos ? `
           <textarea id="leg-obs-fam" rows="3" placeholder="Información relevante del contexto familiar...">${obs_fam}</textarea>
           <button class="btn-p" style="margin-top:8px;font-size:11px" onclick="_guardarObsFam('${a.id}')">Guardar</button>
-        ` : obs_fam
+        ` : (obs_fam
           ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5">${obs_fam}</div>`
-          : `<div style="font-size:11px;color:var(--txt3)">Sin información registrada.</div>`}
+          : `<div style="font-size:11px;color:var(--txt3)">Sin información registrada.</div>`)}
       </div>
     </div>`;
 }
 
 async function _guardarObsFam(alumnoId) {
   const txt = document.getElementById('leg-obs-fam')?.value;
-  const { error } = await sb.from('alumnos').update({ observaciones_familiares: txt }).eq('id', alumnoId);
+  const { error } = await sb.from('alumnos')
+    .update({ observaciones_familiares: txt })
+    .eq('id', alumnoId);
   if (error) alert('Error: ' + error.message);
   else alert('Guardado correctamente.');
 }
@@ -294,7 +374,8 @@ async function _tabContactos(c) {
   const p = legPermisos();
   try {
     const { data, error } = await sb.from('contactos_alumno')
-      .select('*').eq('alumno_id', _legAlumnoSel.id)
+      .select('id,nombre,tipo,telefono,email,es_principal')
+      .eq('alumno_id', _legAlumnoSel.id)
       .order('es_principal', { ascending: false });
     if (error) throw error;
     const lista = data || [];
@@ -306,13 +387,13 @@ async function _tabContactos(c) {
             ${ct.nombre?.[0]?.toUpperCase() || '?'}
           </div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px">
+            <div style="font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               ${ct.nombre}
               ${ct.es_principal ? '<span class="tag tg" style="font-size:9px">Principal</span>' : ''}
             </div>
             <div style="font-size:10px;color:var(--txt2)">${ct.tipo || '—'}</div>
             ${ct.telefono ? `<div style="font-size:10px;color:var(--txt2)">☎ ${ct.telefono}</div>` : ''}
-            ${ct.email ? `<div style="font-size:10px;color:var(--txt2)">✉ ${ct.email}</div>` : ''}
+            ${ct.email    ? `<div style="font-size:10px;color:var(--txt2)">✉ ${ct.email}</div>`    : ''}
           </div>
         </div>
       </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin contactos registrados.</div>';
@@ -326,7 +407,26 @@ async function _tabContactos(c) {
         ${rows}
         <div id="form-contacto"></div>
       </div>`;
-  } catch(e) { c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`; }
+  } catch(e) {
+    c.innerHTML = `<div class="card" style="margin-top:12px">
+      <div class="sec-lb" style="margin-bottom:8px">Contactos y responsables</div>
+      <div style="font-size:11px;color:var(--txt2)">Sin contactos registrados.</div>
+      ${legPermisos().editarContactos ? '<div id="form-contacto" style="margin-top:10px"></div>' : ''}
+    </div>`;
+    if (legPermisos().editarContactos) {
+      // Agregar botón manualmente
+      const card = c.querySelector('.card');
+      if (card) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-p';
+        btn.style.fontSize = '11px';
+        btn.style.marginBottom = '8px';
+        btn.textContent = '+ Agregar contacto';
+        btn.onclick = _mostrarFormContacto;
+        card.insertBefore(btn, card.querySelector('#form-contacto'));
+      }
+    }
+  }
 }
 
 function _mostrarFormContacto() {
@@ -363,10 +463,10 @@ async function _guardarContacto(alumnoId) {
   const { error } = await sb.from('contactos_alumno').insert({
     alumno_id: alumnoId,
     nombre,
-    tipo:        document.getElementById('ct-tipo')?.value || null,
-    telefono:    document.getElementById('ct-tel')?.value  || null,
-    email:       document.getElementById('ct-email')?.value|| null,
-    es_principal:document.getElementById('ct-principal')?.checked || false,
+    tipo:         document.getElementById('ct-tipo')?.value  || null,
+    telefono:     document.getElementById('ct-tel')?.value   || null,
+    email:        document.getElementById('ct-email')?.value || null,
+    es_principal: document.getElementById('ct-principal')?.checked || false,
   });
   if (error) { alert('Error: ' + error.message); return; }
   await _tabContactos(document.getElementById('leg-tab-contenido'));
@@ -374,12 +474,17 @@ async function _guardarContacto(alumnoId) {
 
 // ── TAB 2: ACADÉMICO ──────────────────────────────────
 async function _tabAcademico(c) {
+  // La tabla calificaciones puede no existir aún — manejar gracefulmente
   try {
-    const { data } = await sb.from('calificaciones')
-      .select('*, materia:materias(nombre)')
+    const { data, error } = await sb.from('calificaciones')
+      .select('nota,periodo,materia_texto')
       .eq('alumno_id', _legAlumnoSel.id)
-      .order('periodo').order('created_at', { ascending: false });
-
+      .order('periodo');
+    if (error) {
+      // tabla no existe o no hay datos
+      c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">≡<br>Sin calificaciones registradas.</div></div>`;
+      return;
+    }
     const lista = data || [];
     if (!lista.length) {
       c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">≡<br>Sin calificaciones registradas.</div></div>`;
@@ -388,7 +493,7 @@ async function _tabAcademico(c) {
 
     const porMateria = {};
     lista.forEach(n => {
-      const m = n.materia?.nombre || n.materia_texto || '—';
+      const m = n.materia_texto || '—';
       if (!porMateria[m]) porMateria[m] = [];
       porMateria[m].push(n);
     });
@@ -397,7 +502,7 @@ async function _tabAcademico(c) {
       const prom = promedio(ns.map(n => n.nota));
       return `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--brd)">
-          <div style="font-size:11px;font-weight:500">${mat}</div>
+          <div style="font-size:11px;font-weight:500;flex:1">${mat}</div>
           <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
             ${ns.map(n => `<span class="nota-chip ${NC(n.nota)}">${n.nota ?? '—'}</span>`).join('')}
             ${prom !== null ? `<span class="nota-chip ${NC(prom)}" style="font-weight:700">${prom.toFixed(1)}</span>` : ''}
@@ -419,7 +524,7 @@ async function _tabAcademico(c) {
 async function _tabAsistencia(c) {
   try {
     const { data, error } = await sb.from('asistencias')
-      .select('fecha,estado,justificacion,tipo_registro')
+      .select('fecha,estado,justificacion,tipo_registro,materia_texto')
       .eq('alumno_id', _legAlumnoSel.id)
       .order('fecha', { ascending: false })
       .limit(60);
@@ -434,14 +539,15 @@ async function _tabAsistencia(c) {
     const ausentes  = lista.filter(r => r.estado === 'ausente').length;
     const tardanzas = lista.filter(r => r.estado === 'tardanza').length;
     const retiros   = lista.filter(r => r.estado === 'retiro').length;
-    const pct = Math.round(((lista.length - ausentes) / lista.length) * 100);
+    const pct = lista.length ? Math.round(((lista.length - ausentes) / lista.length) * 100) : 100;
+    const pcClr = pct >= 85 ? 'var(--verde)' : pct >= 75 ? 'var(--ambar)' : 'var(--rojo)';
 
     const rows = lista.slice(0, 30).map(r => {
       const clr = r.estado === 'presente' ? 'var(--verde)' : r.estado === 'ausente' ? 'var(--rojo)' : 'var(--ambar)';
       return `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd)">
           <div style="width:8px;height:8px;border-radius:50%;background:${clr};flex-shrink:0"></div>
-          <div style="font-size:11px;flex:1">${formatFechaLatam(r.fecha)}</div>
+          <div style="font-size:11px;flex:1">${formatFechaLatam(r.fecha)}${r.materia_texto ? ' · <span style="color:var(--txt3)">'+r.materia_texto+'</span>' : ''}</div>
           <div style="font-size:10px;color:${clr};font-weight:500;text-transform:capitalize">${r.estado}</div>
           ${r.justificacion ? `<div style="font-size:10px;color:var(--txt3)">${r.justificacion}</div>` : ''}
         </div>`;
@@ -450,9 +556,9 @@ async function _tabAsistencia(c) {
     c.innerHTML = `
       <div class="card" style="margin-top:12px">
         <div class="metrics m3" style="margin-bottom:14px">
-          <div class="mc"><div class="mc-v" style="color:var(--verde)">${pct}%</div><div class="mc-l">Asistencia</div></div>
+          <div class="mc"><div class="mc-v" style="color:${pcClr}">${pct}%</div><div class="mc-l">Asistencia</div></div>
           <div class="mc"><div class="mc-v" style="color:var(--rojo)">${ausentes}</div><div class="mc-l">Inasistencias</div></div>
-          <div class="mc"><div class="mc-v" style="color:var(--ambar)">${tardanzas + retiros}</div><div class="mc-l">Tardanzas</div></div>
+          <div class="mc"><div class="mc-v" style="color:var(--ambar)">${tardanzas + retiros}</div><div class="mc-l">Tardanzas/retiros</div></div>
         </div>
         <div class="sec-lb" style="margin-bottom:8px">Últimos registros</div>
         ${rows}
@@ -469,7 +575,7 @@ async function _tabProblematicas(c) {
   await cargarProbAlumno(_legAlumnoSel.id, id);
 }
 
-// ── TAB 5: EOE ───────────────────────────────────────
+// ── TAB 5: EOE ────────────────────────────────────────
 async function _tabEOE(c) {
   const p = legPermisos();
   if (!p.verEOE) {
@@ -478,11 +584,13 @@ async function _tabEOE(c) {
   }
   try {
     const { data, error } = await sb.from('intervenciones_eoe')
-      .select('*, reg:usuarios!intervenciones_eoe_registrado_por_fkey(nombre_completo)')
+      .select('id,tipo,descripcion,derivacion,fecha,created_at,registrado_por')
       .eq('alumno_id', _legAlumnoSel.id)
       .order('fecha', { ascending: false });
     if (error) throw error;
     const lista = data || [];
+
+    const usersMap = await _fetchUserNames(lista.map(i => i.registrado_por));
 
     const rows = lista.map(i => `
       <div style="padding:10px 0;border-bottom:1px solid var(--brd)">
@@ -492,7 +600,7 @@ async function _tabEOE(c) {
         </div>
         <div style="font-size:11px;color:var(--txt);line-height:1.5">${i.descripcion}</div>
         ${i.derivacion ? `<div style="font-size:10px;color:var(--txt2);margin-top:4px">Derivación: ${i.derivacion}</div>` : ''}
-        <div style="font-size:10px;color:var(--txt3);margin-top:4px">${i.reg?.nombre_completo || '—'}</div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:4px">${usersMap[i.registrado_por] || '—'}</div>
       </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin intervenciones EOE registradas.</div>';
 
     c.innerHTML = `
@@ -505,7 +613,11 @@ async function _tabEOE(c) {
         <div id="form-eoe"></div>
       </div>`;
   } catch(e) {
-    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`;
+    c.innerHTML = `<div class="card" style="margin-top:12px">
+      <div class="sec-lb" style="margin-bottom:8px">Intervenciones EOE</div>
+      <div style="font-size:11px;color:var(--txt2)">Sin intervenciones registradas.</div>
+      <div id="form-eoe"></div>
+    </div>`;
   }
 }
 
@@ -553,17 +665,18 @@ async function _tabObservaciones(c) {
   const p = legPermisos();
   try {
     const { data, error } = await sb.from('observaciones_legajo')
-      .select('*, reg:usuarios!observaciones_legajo_registrado_por_fkey(nombre_completo)')
+      .select('id,texto,privada,created_at,registrado_por')
       .eq('alumno_id', _legAlumnoSel.id)
       .order('created_at', { ascending: false });
     if (error) throw error;
 
     const lista = (data || []).filter(o => !o.privada || p.verObsPrivadas);
+    const usersMap = await _fetchUserNames(lista.map(o => o.registrado_por));
 
     const rows = lista.map(o => `
       <div style="padding:10px 0;border-bottom:1px solid var(--brd)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <div style="font-size:10px;color:var(--txt3)">${o.reg?.nombre_completo || '—'} · ${tiempoDesde(o.created_at)}</div>
+          <div style="font-size:10px;color:var(--txt3)">${usersMap[o.registrado_por] || '—'} · ${tiempoDesde(o.created_at)}</div>
           ${o.privada ? '<span class="tag td" style="font-size:9px">Privada</span>' : ''}
         </div>
         <div style="font-size:11px;color:var(--txt);line-height:1.5">${o.texto}</div>
@@ -579,7 +692,11 @@ async function _tabObservaciones(c) {
         <div id="form-obs"></div>
       </div>`;
   } catch(e) {
-    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">Error: ${e.message}</div></div>`;
+    c.innerHTML = `<div class="card" style="margin-top:12px">
+      <div class="sec-lb" style="margin-bottom:8px">Observaciones</div>
+      <div style="font-size:11px;color:var(--txt2)">Sin observaciones registradas.</div>
+      <div id="form-obs"></div>
+    </div>`;
   }
 }
 
@@ -619,21 +736,23 @@ async function _tabDocs(c) {
   const p = legPermisos();
   try {
     const { data, error } = await sb.from('documentacion_alumno')
-      .select('*, sub:usuarios!documentacion_alumno_subido_por_fkey(nombre_completo)')
+      .select('id,nombre,tipo,url,created_at,subido_por')
       .eq('alumno_id', _legAlumnoSel.id)
       .order('created_at', { ascending: false });
     if (error) throw error;
     const lista = data || [];
 
+    const usersMap = await _fetchUserNames(lista.map(d => d.subido_por));
+
     const rows = lista.map(d => `
       <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--brd)">
-        <div style="font-size:22px;flex-shrink:0">▤</div>
+        <div style="font-size:20px;flex-shrink:0">▤</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:11px;font-weight:500">${d.nombre}</div>
-          <div style="font-size:10px;color:var(--txt2)">${d.tipo || '—'} · ${d.sub?.nombre_completo || '—'}</div>
+          <div style="font-size:10px;color:var(--txt2)">${d.tipo || '—'} · ${usersMap[d.subido_por] || '—'}</div>
           <div style="font-size:10px;color:var(--txt3)">${tiempoDesde(d.created_at)}</div>
         </div>
-        ${d.url ? `<a href="${d.url}" target="_blank" class="btn-s" style="font-size:10px;padding:4px 10px;text-decoration:none;display:inline-block">Ver</a>` : ''}
+        ${d.url ? `<a href="${d.url}" target="_blank" class="btn-s" style="font-size:10px;padding:4px 10px;text-decoration:none;display:inline-block;flex-shrink:0">Ver</a>` : ''}
       </div>`).join('') || '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin documentos cargados.</div>';
 
     c.innerHTML = `
@@ -646,7 +765,11 @@ async function _tabDocs(c) {
         <div id="form-doc"></div>
       </div>`;
   } catch(e) {
-    c.innerHTML = `<div class="card" style="margin-top:12px"><div class="empty-state">▤<br>Error: ${e.message}</div></div>`;
+    c.innerHTML = `<div class="card" style="margin-top:12px">
+      <div class="sec-lb" style="margin-bottom:8px">Documentación</div>
+      <div style="font-size:11px;color:var(--txt2)">Sin documentos cargados.</div>
+      <div id="form-doc"></div>
+    </div>`;
   }
 }
 
@@ -665,7 +788,7 @@ function _mostrarFormDoc(alumnoId) {
           <option>Informe escolar</option><option>Otro</option>
         </select>
       </div>
-      <input type="url" id="doc-url" placeholder="URL (Google Drive, etc.)" style="margin-bottom:8px">
+      <input type="url" id="doc-url" placeholder="URL del documento (Google Drive, etc.)" style="margin-bottom:8px">
       <div class="acc">
         <button class="btn-p" style="font-size:11px" onclick="_guardarDoc('${alumnoId}')">Guardar</button>
         <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-doc').innerHTML=''">Cancelar</button>
@@ -693,11 +816,16 @@ function inyectarEstilosLeg() {
   const s = document.createElement('style');
   s.id = 'leg-styles';
   s.textContent = `
+    .leg-anios-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+    .leg-anio-card{background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad);padding:18px 14px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:box-shadow .15s,border-color .15s;position:relative}
+    .leg-anio-card:hover{box-shadow:0 2px 10px rgba(0,0,0,.1);border-color:var(--verde)}
+    .leg-anio-num{font-family:'Lora',serif;font-size:22px;font-weight:600;color:var(--verde)}
+    .leg-anio-card .leg-curso-arrow{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:16px}
     .leg-nivel-header{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;padding-left:2px}
-    .leg-cursos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+    .leg-cursos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
     .leg-curso-card{background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad);padding:14px 12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s,border-color .15s}
     .leg-curso-card:hover{box-shadow:0 2px 10px rgba(0,0,0,.1);border-color:var(--verde)}
-    .leg-curso-badge{font-size:16px;font-weight:700;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Lora',serif}
+    .leg-curso-badge{font-family:'Lora',serif;font-size:17px;font-weight:700;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
     .leg-curso-nombre{font-size:11px;font-weight:500;color:var(--txt);line-height:1.3}
     .leg-curso-arrow{font-size:14px;color:var(--txt3);align-self:flex-end}
     .leg-alumno-row{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--brd);transition:background .1s}
@@ -723,7 +851,7 @@ function inyectarEstilosLeg() {
     .btn-ghost{background:none;border:none;cursor:pointer;color:var(--verde);font-size:12px;font-weight:500;padding:3px 8px;border-radius:6px;font-family:'DM Sans',sans-serif;transition:background .12s}
     .btn-ghost:hover{background:var(--verde-l)}
     @media(max-width:600px){
-      .leg-cursos-grid{grid-template-columns:repeat(2,1fr)}
+      .leg-anios-grid,.leg-cursos-grid{grid-template-columns:repeat(2,1fr)}
       .leg-dato-grid{grid-template-columns:1fr}
     }
   `;
