@@ -2,13 +2,7 @@
 // DASHBOARD.JS — Panel principal por rol
 // =====================================================
 
-// ── SHARED CONFIG ─────────────────────────────────────
-const NIVEL_CONFIG = {
-  inicial:    { color:'#1a7a4a', bg:'#e8f5ee', label:'Inicial' },
-  primario:   { color:'#1a5276', bg:'#eaf2fb', label:'Primario' },
-  secundario: { color:'#6c3483', bg:'#f5eef8', label:'Secundario' },
-  todos:      { color:'#b8963e', bg:'#fdf6e8', label:'Toda la institución' },
-};
+// NIVEL_CONFIG está declarado en agenda.js (cargado antes) y se comparte globalmente
 
 // Lunes a domingo de la semana actual
 function _semanaActual() {
