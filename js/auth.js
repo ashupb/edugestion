@@ -21,22 +21,26 @@ async function login() {
   ocultarErrorLogin();
 
   try {
-    // 1. Buscar email a partir del nombre de usuario
-    const { data: usuarioRow, error: errUser } = await sb
-      .from('usuarios')
-      .select('email')
-      .eq('username', username)
-      .eq('activo', true)
-      .single();
+    // 1. Resolver email: si tiene @ es email directo, sino buscar por username
+    let emailParaAuth = username;
+    if (!username.includes('@')) {
+      const { data: usuarioRow, error: errUser } = await sb
+        .from('usuarios')
+        .select('email')
+        .eq('username', username)
+        .eq('activo', true)
+        .single();
 
-    if (errUser || !usuarioRow?.email) {
-      mostrarErrorLogin('Usuario o contraseña incorrectos.');
-      resetBtn();
-      return;
+      if (errUser || !usuarioRow?.email) {
+        mostrarErrorLogin('Usuario o contraseña incorrectos.');
+        resetBtn();
+        return;
+      }
+      emailParaAuth = usuarioRow.email;
     }
 
-    // 2. Autenticar con Supabase Auth usando el email
-    const { data, error } = await sb.auth.signInWithPassword({ email: usuarioRow.email, password: pass });
+    // 2. Autenticar con Supabase Auth
+    const { data, error } = await sb.auth.signInWithPassword({ email: emailParaAuth, password: pass });
 
     if (error) {
       mostrarErrorLogin('Email o contraseña incorrectos.');
