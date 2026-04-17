@@ -7,12 +7,12 @@ let INSTITUCION_ACTUAL = null; // datos de su institución
 
 // ── LOGIN ────────────────────────────────────────────
 async function login() {
-  const email = document.getElementById('inp-email').value.trim();
-  const pass  = document.getElementById('inp-pass').value;
-  const btn   = document.getElementById('btn-login');
+  const username = document.getElementById('inp-email').value.trim();
+  const pass     = document.getElementById('inp-pass').value;
+  const btn      = document.getElementById('btn-login');
 
-  if (!email || !pass) {
-    mostrarErrorLogin('Completá email y contraseña.');
+  if (!username || !pass) {
+    mostrarErrorLogin('Completá usuario y contraseña.');
     return;
   }
 
@@ -21,8 +21,22 @@ async function login() {
   ocultarErrorLogin();
 
   try {
-    // 1. Autenticar con Supabase Auth
-    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+    // 1. Buscar email a partir del nombre de usuario
+    const { data: usuarioRow, error: errUser } = await sb
+      .from('usuarios')
+      .select('email')
+      .eq('username', username)
+      .eq('activo', true)
+      .single();
+
+    if (errUser || !usuarioRow?.email) {
+      mostrarErrorLogin('Usuario o contraseña incorrectos.');
+      resetBtn();
+      return;
+    }
+
+    // 2. Autenticar con Supabase Auth usando el email
+    const { data, error } = await sb.auth.signInWithPassword({ email: usuarioRow.email, password: pass });
 
     if (error) {
       mostrarErrorLogin('Email o contraseña incorrectos.');
@@ -70,7 +84,7 @@ async function cerrarSesion() {
   INSTITUCION_ACTUAL = null;
   document.getElementById('shell').style.display       = 'none';
   document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('inp-email').value = '';
+  document.getElementById('inp-email').value = ''; // campo usuario
   document.getElementById('inp-pass').value  = '';
   resetBtn();
 }

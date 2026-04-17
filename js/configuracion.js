@@ -264,7 +264,7 @@ function _renderUsuariosList() {
             <div class="av av32" style="background:${nivelColor};color:#fff;flex-shrink:0">${iniciales}</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:12px;font-weight:600;${inactivo ? 'color:var(--txt3);text-decoration:line-through' : ''}">${_esc(u.nombre_completo) || '—'}</div>
-              <div style="font-size:10px;color:var(--txt2)">${u.email || ''}</div>
+              <div style="font-size:10px;color:var(--txt2)">${u.username ? '@' + u.username : (u.email || '')}</div>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0">
               <span class="tag ${rolBadge}">${ROL_LABELS_ADM[u.rol] || u.rol}</span>
@@ -314,7 +314,13 @@ async function _abrirModalUsuario(userId) {
       <input type="text" id="mu-nombre" value="${_esc(user?.nombre_completo)}" placeholder="Nombre y apellido">
     </div>
     <div class="adm-form-row">
-      <label class="adm-label">Email</label>
+      <label class="adm-label">Nombre de usuario</label>
+      <input type="text" id="mu-username" value="${_esc(user?.username)}" placeholder="nombre.usuario"
+        ${!esNuevo ? 'readonly style="opacity:.6;cursor:default"' : ''}>
+      ${esNuevo ? `<div style="font-size:10px;color:var(--txt2);margin-top:3px">Solo letras, números, puntos y guiones. Ej: ana.gomez</div>` : ''}
+    </div>
+    <div class="adm-form-row">
+      <label class="adm-label">Email (para recuperación de contraseña)</label>
       <input type="email" id="mu-email" value="${_esc(user?.email)}" placeholder="email@ejemplo.com"
         ${!esNuevo ? 'readonly style="opacity:.6;cursor:default"' : ''}>
     </div>
@@ -419,6 +425,7 @@ function _muOnNivelChange(cursosTodosJSON) {
 
 async function _guardarUsuario(userId, esNuevo) {
   const nombre_completo = document.getElementById('mu-nombre')?.value?.trim();
+  const username        = document.getElementById('mu-username')?.value?.trim().toLowerCase();
   const email           = document.getElementById('mu-email')?.value?.trim();
   const password        = document.getElementById('mu-pass')?.value || '';
   const rol             = document.getElementById('mu-rol')?.value;
@@ -428,10 +435,15 @@ async function _guardarUsuario(userId, esNuevo) {
   const cursosChecks = document.querySelectorAll('#mu-cursos-list input[type=checkbox]:checked');
   const cursos_ids   = Array.from(cursosChecks).map(c => c.value);
 
-  if (!nombre_completo) { alert('El nombre es requerido.'); return; }
-  if (!email)           { alert('El email es requerido.'); return; }
-  if (esNuevo && !password)        { alert('La contraseña es requerida para nuevos usuarios.'); return; }
-  if (esNuevo && password.length < 8) { alert('La contraseña debe tener al menos 8 caracteres.'); return; }
+  if (!nombre_completo)              { alert('El nombre es requerido.'); return; }
+  if (esNuevo && !username)          { alert('El nombre de usuario es requerido.'); return; }
+  if (esNuevo && !email)             { alert('El email es requerido.'); return; }
+  if (esNuevo && !password)          { alert('La contraseña es requerida para nuevos usuarios.'); return; }
+  if (esNuevo && password.length < 8){ alert('La contraseña debe tener al menos 8 caracteres.'); return; }
+  if (esNuevo && !/^[a-z0-9._-]+$/.test(username)) {
+    alert('El nombre de usuario solo puede contener letras minúsculas, números, puntos y guiones.');
+    return;
+  }
 
   try {
     if (esNuevo) {
@@ -451,7 +463,7 @@ async function _guardarUsuario(userId, esNuevo) {
 
       const { error: insErr } = await sb.from('usuarios').insert([{
         id: authData.id,
-        nombre_completo, email, rol, nivel, activo,
+        nombre_completo, username, email, rol, nivel, activo,
         cursos_ids: cursos_ids.length ? cursos_ids : null,
         institucion_id: USUARIO_ACTUAL.institucion_id,
       }]);
