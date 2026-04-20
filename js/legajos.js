@@ -92,7 +92,7 @@ function _renderLegAnios(anios) {
   const c = document.getElementById('page-leg');
   if (!anios || !anios.length) {
     c.innerHTML = `
-      <div class="pg-t">Legajos</div>
+      <div class="pg-t">Resumen del estudiante</div>
       <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''}</div>
       <div class="empty-state">▤<br>Sin cursos registrados</div>`;
     return;
@@ -109,7 +109,7 @@ function _renderLegAnios(anios) {
     </div>`).join('');
 
   c.innerHTML = `
-    <div class="pg-t">Legajos</div>
+    <div class="pg-t">Resumen del estudiante</div>
     <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''} · Seleccioná el año lectivo</div>
     <div class="leg-anios-grid" style="margin-top:16px">${cards}</div>`;
 }

@@ -563,6 +563,21 @@ async function guardarEvento(eventoId) {
           respuesta:  'pendiente',
         }))
       );
+      // Notificar a los invitados para que acepten o rechacen
+      const fechaStr = data.fecha_inicio ? (() => {
+        const d = new Date(data.fecha_inicio + 'T12:00:00');
+        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+      })() : '';
+      await sb.from('notificaciones').insert(
+        convocados.map(uid => ({
+          usuario_id:       uid,
+          tipo:             'invitacion_evento',
+          titulo:           `Invitación: ${nombre}`,
+          descripcion:      `${fechaStr}${data.hora ? ' · ' + data.hora.slice(0,5) : ''}${data.lugar ? ' · ' + data.lugar : ''} — Confirmá tu asistencia.`,
+          referencia_id:    data.id,
+          referencia_tabla: 'eventos_institucionales',
+        }))
+      );
     }
   }
 

@@ -573,7 +573,7 @@ async function guardarProb() {
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar y notificar'; }
       return;
     }
-    await crearAlertasProb(nueva.id, urg, nivel);
+    await crearAlertasProb(nueva.id, urg, nivel, alumno.id, respId);
   }
 
   document.getElementById('form-prob').innerHTML = '';
@@ -583,9 +583,24 @@ async function guardarProb() {
 }
 
 // ─── ALERTAS AUTOMÁTICAS ──────────────────────────────
-async function crearAlertasProb(probId, urgencia, nivel) {
+async function crearAlertasProb(probId, urgencia, nivel, alumnoId, respId) {
   const instId = USUARIO_ACTUAL.institucion_id;
   let dests = [];
+
+  // Obtener curso del alumno para notificar a su preceptor
+  let cursoIdAlumno = null;
+  if (alumnoId) {
+    const { data: al } = await sb.from('alumnos').select('curso_id').eq('id', alumnoId).single();
+    cursoIdAlumno = al?.curso_id || null;
+  }
+
+  // Director general y directivos de nivel — siempre
+  let qDir = sb.from('usuarios').select('id')
+    .eq('institucion_id', instId).eq('activo', true)
+    .in('rol', ['director_general','directivo_nivel']);
+  if (nivel) qDir = qDir.or(`rol.eq.director_general,nivel.eq.${nivel}`);
+  const { data: dirs } = await qDir;
+  dests.push(...(dirs || []).map(u => u.id));
 
   // EOE: urgencia media o alta
   if (urgencia === 'alta' || urgencia === 'media') {
@@ -594,15 +609,16 @@ async function crearAlertasProb(probId, urgencia, nivel) {
     dests.push(...(eoe || []).map(u => u.id));
   }
 
-  // Directivos: solo urgencia alta
-  if (urgencia === 'alta') {
-    let q = sb.from('usuarios').select('id')
-      .eq('institucion_id', instId).eq('activo', true)
-      .in('rol', ['director_general','directivo_nivel']);
-    if (nivel) q = q.eq('nivel', nivel);
-    const { data: dirs } = await q;
-    dests.push(...(dirs || []).map(u => u.id));
+  // Preceptores del curso del alumno
+  if (cursoIdAlumno) {
+    const { data: precs } = await sb.from('usuarios').select('id')
+      .eq('institucion_id', instId).eq('rol', 'preceptor').eq('activo', true)
+      .contains('cursos_ids', [cursoIdAlumno]);
+    dests.push(...(precs || []).map(u => u.id));
   }
+
+  // Responsable asignado
+  if (respId) dests.push(respId);
 
   dests = [...new Set(dests)].filter(id => id !== USUARIO_ACTUAL.id);
   if (!dests.length) return;
@@ -614,14 +630,14 @@ async function crearAlertasProb(probId, urgencia, nivel) {
     );
   } catch(_) {}
 
-  // Notificaciones (siempre)
-  const urgLabel = urgencia === 'alta' ? 'URGENTE' : 'Media';
+  // Notificaciones
+  const urgLabel = urgencia === 'alta' ? 'URGENTE' : urgencia === 'media' ? 'Media' : 'Baja';
   await sb.from('notificaciones').insert(
     dests.map(uid => ({
       usuario_id:       uid,
       tipo:             'nueva_problematica',
-      titulo:           `Urgencia ${urgLabel} — Nueva problemática`,
-      descripcion:      `Registrado por ${USUARIO_ACTUAL.nombre_completo}`,
+      titulo:           `[${urgLabel}] Nueva situación problemática`,
+      descripcion:      `Registrado por ${USUARIO_ACTUAL.nombre_completo}. Podés ver el seguimiento en Problemáticas.`,
       referencia_id:    probId,
       referencia_tabla: 'problematicas',
     }))

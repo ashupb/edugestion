@@ -319,8 +319,12 @@ async function rAsistPreceptor() {
     ${!bloqueoAyer ? `
     <div style="background:${todasHoy?'var(--verde-l)':'var(--rojo-l)'};border-left:4px solid ${todasHoy?'var(--verde)':'var(--rojo)'};border-radius:var(--rad);padding:12px 14px;margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:${todasHoy?'var(--verde)':'var(--rojo)'}">
-        ${todasHoy ? '✅ Todas las listas de hoy registradas' : `⏳ ${pendientesHoy.length} lista(s) pendiente(s) de hoy`}
+        ${todasHoy ? '✅ Todas las listas de hoy registradas' : `⏳ Listas pendientes — ${formatFechaLatam(hoy)}`}
       </div>
+      ${!todasHoy ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          ${pendientesHoy.map(c=>`<span style="font-size:11px;color:var(--rojo);font-weight:500">${c.nombre}${c.division}</span>`).join('<span style="color:var(--txt3)"> · </span>')}
+        </div>` : ''}
     </div>` : ''}
 
     <div class="sec-lb">Mis cursos</div>

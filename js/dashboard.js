@@ -264,7 +264,7 @@ async function rDashDirector() {
         ${nivelesPanel}
         <div class="acc" style="margin-top:4px">
           <button class="btn-s" style="font-size:11px" onclick="goPage('prob')">△ Problemáticas</button>
-          <button class="btn-s" style="font-size:11px" onclick="goPage('leg')">▤ Legajos</button>
+          <button class="btn-s" style="font-size:11px" onclick="goPage('leg')">▤ Resumen estudiante</button>
         </div>
       </div>
       <div class="dash-col-r">
@@ -330,7 +330,7 @@ async function rDashDirectivo() {
         ${renderNivelPanel(nivel, probs)}
         <div class="acc" style="margin-top:4px">
           <button class="btn-s" style="font-size:11px" onclick="goPage('prob')">△ Problemáticas</button>
-          <button class="btn-s" style="font-size:11px" onclick="goPage('leg')">▤ Legajos</button>
+          <button class="btn-s" style="font-size:11px" onclick="goPage('leg')">▤ Resumen estudiante</button>
         </div>
       </div>
       <div class="dash-col-r">
@@ -399,7 +399,7 @@ async function rDashEOE() {
         </div>
         <div class="acc">
           <button class="btn-p" onclick="goPage('eoe')">✦ Ver mis casos</button>
-          <button class="btn-s" onclick="goPage('leg')">▤ Legajos</button>
+          <button class="btn-s" onclick="goPage('leg')">▤ Resumen</button>
           <button class="btn-s" onclick="goPage('prob')">△ Situaciones</button>
         </div>
       </div>
@@ -605,17 +605,30 @@ async function rDashPreceptor() {
   const pendResp   = (respRes.data    || []).filter(r => r.eventos_institucionales);
   const cursoIdsList = cursos.map(c => c.id);
 
-  // Asistencia hoy + alertas (requiere cursos)
-  let asistHoy = [], alertasAlumnos = [];
+  // Calcular ayer y si fue día hábil
+  const ayerDate = new Date(sem.hoy + 'T12:00:00');
+  ayerDate.setDate(ayerDate.getDate() - 1);
+  const ayer = ayerDate.toISOString().split('T')[0];
+  const diaAyer = ayerDate.getDay();
+  const ayerHabil = diaAyer >= 1 && diaAyer <= 5;
+
+  // Asistencia hoy + ayer + alertas (requiere cursos)
+  let asistHoy = [], asistAyer = [], alertasAlumnos = [];
   if (cursoIdsList.length) {
-    const [asistRes, alumnosRes] = await Promise.all([
+    const queries = [
       sb.from('asistencia').select('curso_id')
         .in('curso_id', cursoIdsList).eq('fecha', sem.hoy).is('hora_clase', null),
       sb.from('alumnos').select('id')
         .in('curso_id', cursoIdsList).eq('activo', true),
-    ]);
-    asistHoy = asistRes.data || [];
-    const alumnoIds = (alumnosRes.data || []).map(a => a.id);
+    ];
+    if (ayerHabil) {
+      queries.push(sb.from('asistencia').select('curso_id')
+        .in('curso_id', cursoIdsList).eq('fecha', ayer).is('hora_clase', null));
+    }
+    const results = await Promise.all(queries);
+    asistHoy = results[0].data || [];
+    const alumnoIds = (results[1].data || []).map(a => a.id);
+    if (ayerHabil) asistAyer = results[2]?.data || [];
     if (alumnoIds.length) {
       const { data: alertasData } = await sb.from('alertas_asistencia')
         .select('tipo_alerta,total_faltas,alumnos(nombre,apellido,cursos(nombre,division))')
@@ -626,27 +639,47 @@ async function rDashPreceptor() {
     }
   }
 
-  const cursosConLista = new Set((asistHoy || []).map(a => a.curso_id));
-  const pendientes     = cursos.filter(c => !cursosConLista.has(c.id));
-  const todasListas    = pendientes.length === 0 && cursos.length > 0;
+  const cursosConListaHoy  = new Set((asistHoy  || []).map(a => a.curso_id));
+  const cursosConListaAyer = new Set((asistAyer || []).map(a => a.curso_id));
+  const pendientesHoy  = cursos.filter(c => !cursosConListaHoy.has(c.id));
+  const pendientesAyer = ayerHabil ? cursos.filter(c => !cursosConListaAyer.has(c.id)) : [];
+  const todasListas    = pendientesHoy.length === 0 && pendientesAyer.length === 0 && cursos.length > 0;
   const nc             = NIVEL_CONFIG[nivel] || NIVEL_CONFIG.todos;
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
 
+  // Formatear fecha corta dd/mm
+  const fmtCorta = iso => {
+    const d = new Date(iso + 'T12:00:00');
+    return `${d.getDate()}/${d.getMonth()+1}`;
+  };
+  const DIAS_ES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const diaLabel = iso => {
+    const d = new Date(iso + 'T12:00:00');
+    return `${DIAS_ES[d.getDay()]} ${fmtCorta(iso)}`;
+  };
+
   // Banner listas
+  const diasPendientes = [];
+  if (pendientesAyer.length) diasPendientes.push({ fecha: ayer, cursos: pendientesAyer });
+  if (pendientesHoy.length)  diasPendientes.push({ fecha: sem.hoy, cursos: pendientesHoy });
+
   const listasHTML = `
     <div style="background:${todasListas ? 'var(--verde-l)' : 'var(--rojo-l)'};border-left:4px solid ${todasListas ? 'var(--verde)' : 'var(--rojo)'};border-radius:var(--rad);padding:12px 14px;margin-bottom:14px">
       <div style="font-size:12px;font-weight:600;color:${todasListas ? 'var(--verde)' : 'var(--rojo)'}">
         ${todasListas
-          ? '✅ Todas las listas registradas hoy'
-          : `⏳ ${pendientes.length} lista${pendientes.length > 1 ? 's' : ''} pendiente${pendientes.length > 1 ? 's' : ''} de tomar`}
+          ? '✅ Todas las listas registradas'
+          : `⏳ Días con listas incompletas`}
       </div>
-      ${!todasListas ? `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-          ${pendientes.map(c => `
-            <button class="btn-d" style="font-size:10px;padding:4px 10px" onclick="goPage('asist')">
-              ${c.nombre}${c.division || ''}
-            </button>`).join('')}
-        </div>` : ''}
+      ${!todasListas ? diasPendientes.map(dp => `
+        <div style="margin-top:8px">
+          <div style="font-size:10px;font-weight:600;color:var(--txt2);margin-bottom:4px">${diaLabel(dp.fecha)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${dp.cursos.map(c => `
+              <button class="btn-d" style="font-size:10px;padding:4px 10px" onclick="goPage('asist')">
+                ${c.nombre}${c.division || ''}
+              </button>`).join('')}
+          </div>
+        </div>`).join('') : ''}
     </div>`;
 
   // Alertas asistencia
@@ -679,7 +712,7 @@ async function rDashPreceptor() {
         ${alertasHTML}
         <div class="acc" style="margin-top:10px">
           <button class="btn-p" onclick="goPage('asist')">📋 Tomar lista</button>
-          <button class="btn-s" onclick="goPage('leg')">▤ Legajos</button>
+          <button class="btn-s" onclick="goPage('leg')">▤ Resumen</button>
           <button class="btn-s" onclick="goPage('prob')">△ Reportar</button>
         </div>
       </div>

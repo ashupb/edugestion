@@ -15,7 +15,7 @@ const NAV_CONFIG = {
     { id:'asist',   icon:'✓',  label:'Asistencia' },
     { id:'notas',   icon:'≡',  label:'Calificaciones' },
     { sec: 'Institución' },
-    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'leg',     icon:'▤',  label:'Resumen del estudiante' },
     { id:'admin',   icon:'⊙',  label:'Configuración' },
   ],
   directivo_nivel: [
@@ -30,7 +30,7 @@ const NAV_CONFIG = {
     { id:'asist',   icon:'✓',  label:'Asistencia' },
     { id:'notas',   icon:'≡',  label:'Calificaciones' },
     { sec: 'Institución' },
-    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'leg',     icon:'▤',  label:'Resumen del estudiante' },
   ],
   eoe: [
     { sec: 'General' },
@@ -43,7 +43,7 @@ const NAV_CONFIG = {
     { sec: 'Recursos' },
     { id:'asist',   icon:'✓',  label:'Asistencia' },
     { id:'notas',   icon:'≡',  label:'Calificaciones' },
-    { id:'leg',     icon:'▤',  label:'Legajos' },
+    { id:'leg',     icon:'▤',  label:'Resumen del estudiante' },
   ],
   docente: [
     { sec: 'General' },
@@ -66,7 +66,7 @@ const NAV_CONFIG = {
     { sec: 'Institucional' },
     { id:'prob',  icon:'△',   label:'Reportar situación' },
     { id:'obj',   icon:'◎',   label:'Objetivos' },
-    { id:'leg',   icon:'▤',   label:'Legajos' },
+    { id:'leg',   icon:'▤',   label:'Resumen del estudiante' },
   ],
   admin: [
     { sec: 'General' },

@@ -42,7 +42,7 @@ async function cargarNotificaciones() {
 async function abrirNotif(id, tabla) {
   await sb.from('notificaciones').update({ leida: true }).eq('id', id);
   document.getElementById('notif-panel').style.display = 'none';
-  const destino = { problematicas:'prob', reuniones:'reuniones', objetivos:'obj' }[tabla] || 'dash';
+  const destino = { problematicas:'prob', reuniones:'reuniones', objetivos:'obj', eventos_institucionales:'agenda' }[tabla] || 'dash';
   goPage(destino);
   cargarNotificaciones();
 }

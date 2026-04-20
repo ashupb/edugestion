@@ -310,12 +310,15 @@ function renderBottomNav() {
 
 function togglePass() {
   const inp = document.getElementById('inp-pass');
-  const btn = document.getElementById('btn-ojo');
+  const eyeOpen   = document.getElementById('ojo-abierto');
+  const eyeClosed = document.getElementById('ojo-cerrado');
   if (inp.type === 'password') {
     inp.type = 'text';
-    btn.textContent = '🙈'; // cerrado = ocultar
+    eyeOpen.style.display   = '';
+    eyeClosed.style.display = 'none';
   } else {
     inp.type = 'password';
-    btn.textContent = '👁';  // abierto = mostrar
+    eyeOpen.style.display   = 'none';
+    eyeClosed.style.display = '';
   }
 }
