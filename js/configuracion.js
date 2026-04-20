@@ -7,6 +7,14 @@ let _adminTab       = null;
 let _adminCursos    = [];
 let _adminUsuarios  = [];
 let _adminMaterias  = [];
+let _configExtraOk  = null; // detecta si la columna config_extra existe
+
+async function _detectarConfigExtra() {
+  if (_configExtraOk !== null) return _configExtraOk;
+  const { error } = await sb.from('usuarios').select('config_extra').limit(1);
+  _configExtraOk = !error || !error.message?.includes('column');
+  return _configExtraOk;
+}
 
 // ─── CONSTANTES ──────────────────────────────────────
 const NIVEL_COLORS_ADM = {
@@ -38,9 +46,22 @@ const ROL_BADGE_ADM = {
 };
 
 // ─── TABS POR ROL ─────────────────────────────────────
+// Tab IDs disponibles para asignación manual por director_general
+const CONFIG_TABS_TODOS = [
+  { id: 'institucion',  label: 'Institución' },
+  { id: 'usuarios',     label: 'Usuarios' },
+  { id: 'cursos',       label: 'Cursos' },
+  { id: 'alumnos',      label: 'Alumnos' },
+  { id: 'materias',     label: 'Materias' },
+  { id: 'asignaciones', label: 'Asignaciones' },
+  { id: 'parametros',   label: 'Parámetros' },
+];
+
 function _adminTabs() {
-  const r = USUARIO_ACTUAL?.rol;
-  return [
+  const r      = USUARIO_ACTUAL?.rol;
+  const extras = USUARIO_ACTUAL?.config_extra?.tabs || [];
+
+  const rolBase = [
     { id: 'institucion',  label: 'Institución',     roles: ['director_general'] },
     { id: 'usuarios',     label: 'Usuarios',         roles: ['director_general', 'directivo_nivel'] },
     { id: 'cursos',       label: 'Cursos',           roles: ['director_general', 'directivo_nivel', 'preceptor'] },
@@ -48,13 +69,22 @@ function _adminTabs() {
     { id: 'materias',     label: 'Materias',         roles: ['director_general', 'directivo_nivel'] },
     { id: 'asignaciones', label: 'Asignaciones',     roles: ['director_general', 'directivo_nivel'] },
     { id: 'parametros',   label: 'Parámetros',       roles: ['director_general', 'directivo_nivel'] },
-  ].filter(t => t.roles.includes(r));
+  ];
+
+  const resultado = rolBase.filter(t => t.roles.includes(r));
+  // Agregar tabs extra (asignados por director_general) que no estén ya incluidos
+  extras.forEach(tabId => {
+    const def = CONFIG_TABS_TODOS.find(t => t.id === tabId);
+    if (def && !resultado.find(t => t.id === tabId)) resultado.push(def);
+  });
+  return resultado;
 }
 
 // ─── RENDER PRINCIPAL ─────────────────────────────────
 async function rAdmin() {
   showLoading('admin');
   inyectarEstilosAdmin();
+  await _detectarConfigExtra();
 
   const tabs = _adminTabs();
   if (!tabs.length) {
@@ -283,7 +313,7 @@ async function _abrirModalUsuario(userId) {
   const { data: cursosAll } = await sb.from('cursos')
     .select('id,nombre,division,nivel')
     .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-    .eq('activo', true)
+    .or('activo.is.null,activo.eq.true')
     .order('nivel').order('nombre');
   const cursosTodos = cursosAll || [];
 
@@ -365,6 +395,21 @@ async function _abrirModalUsuario(userId) {
         </div>
       </div>
     </div>
+    ${(_configExtraOk && USUARIO_ACTUAL.rol === 'director_general' && !esNuevo) ? `
+    <div class="adm-form-row">
+      <label class="adm-label">Accesos a Configuración</label>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--surf2);border:1px solid var(--brd);border-radius:var(--rad)">
+        <div style="font-size:10px;color:var(--txt2);margin-bottom:2px">Secciones adicionales habilitadas para este usuario:</div>
+        ${CONFIG_TABS_TODOS.map(t => {
+          const yaRol = { institucion:['director_general'], usuarios:['director_general','directivo_nivel'], cursos:['director_general','directivo_nivel','preceptor'], alumnos:['director_general','directivo_nivel','preceptor'], materias:['director_general','directivo_nivel'], asignaciones:['director_general','directivo_nivel'], parametros:['director_general','directivo_nivel'] }[t.id]?.includes(rolSel);
+          const checked = (user?.config_extra?.tabs || []).includes(t.id);
+          return `<label style="display:flex;align-items:center;gap:7px;cursor:${yaRol?'default':'pointer'};font-size:12px;${yaRol?'color:var(--txt3)':''}">
+            <input type="checkbox" name="mu-cfg-tab" value="${t.id}" ${checked||yaRol?'checked':''} ${yaRol?'disabled':''}>
+            ${t.label}${yaRol?' <span style="font-size:10px;color:var(--verde)">(por rol)</span>':''}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
     `,
     async () => { await _guardarUsuario(userId, esNuevo); }
   );
@@ -469,10 +514,17 @@ async function _guardarUsuario(userId, esNuevo) {
       }]);
       if (insErr) throw insErr;
     } else {
-      const { error } = await sb.from('usuarios').update({
+      const updatePayload = {
         nombre_completo, rol, nivel, activo,
         cursos_ids: cursos_ids.length ? cursos_ids : null,
-      }).eq('id', userId);
+      };
+      // Guardar accesos extra si la migración está aplicada y el editor es director_general
+      if (_configExtraOk && USUARIO_ACTUAL.rol === 'director_general') {
+        const tabChecks = document.querySelectorAll('input[name="mu-cfg-tab"]:not(:disabled):checked');
+        const tabsExtra = Array.from(tabChecks).map(c => c.value);
+        updatePayload.config_extra = tabsExtra.length ? { tabs: tabsExtra } : {};
+      }
+      const { error } = await sb.from('usuarios').update(updatePayload).eq('id', userId);
       if (error) throw error;
     }
 
@@ -667,7 +719,7 @@ async function _renderAlumnos() {
   let qc = sb.from('cursos')
     .select('id,nombre,division,nivel')
     .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-    .eq('activo', true)
+    .or('activo.is.null,activo.eq.true')
     .order('nivel').order('nombre');
 
   if (USUARIO_ACTUAL.rol === 'directivo_nivel') qc = qc.eq('nivel', USUARIO_ACTUAL.nivel);
@@ -741,7 +793,9 @@ async function _abrirModalAlumno(alumnoId) {
   const al = alumnoId ? _admAlumnosList.find(a => a.id === alumnoId) : null;
 
   let qc = sb.from('cursos').select('id,nombre,division,nivel')
-    .eq('institucion_id', USUARIO_ACTUAL.institucion_id).eq('activo', true).order('nivel').order('nombre');
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .or('activo.is.null,activo.eq.true')
+    .order('nivel').order('nombre');
   if (USUARIO_ACTUAL.rol === 'directivo_nivel')  qc = qc.eq('nivel', USUARIO_ACTUAL.nivel);
   else if (USUARIO_ACTUAL.rol === 'preceptor') {
     const ids = USUARIO_ACTUAL.cursos_ids || [];
@@ -820,7 +874,9 @@ async function _abrirCambiarCurso(alumnoId) {
 
   const cursoActual = _adminCursos.find(c => c.id === al.curso_id);
   let qc = sb.from('cursos').select('id,nombre,division,nivel')
-    .eq('institucion_id', USUARIO_ACTUAL.institucion_id).eq('activo', true).order('nivel').order('nombre');
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .or('activo.is.null,activo.eq.true')
+    .order('nivel').order('nombre');
   if (cursoActual?.nivel) qc = qc.eq('nivel', cursoActual.nivel);
   const { data: cursosDisp } = await qc;
   const otros = (cursosDisp || []).filter(c => c.id !== al.curso_id);
@@ -1063,7 +1119,7 @@ async function _renderAsignaciones() {
 
   const [cursosRes, materiasRes, docentesRes] = await Promise.all([
     sb.from('cursos').select('id,nombre,division,nivel')
-      .eq('institucion_id', USUARIO_ACTUAL.institucion_id).eq('activo', true).order('nivel').order('nombre'),
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id).or('activo.is.null,activo.eq.true').order('nivel').order('nombre'),
     sb.from('materias').select('id,nombre,nivel')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id).eq('activo', true).order('nombre'),
     sb.from('usuarios').select('id,nombre_completo,nivel')
@@ -1240,7 +1296,7 @@ async function _renderParamNivel(nivel) {
 
   const [cfgRes, tiposEvalRes, tiposJustRes, tiposEventoRes, periodosRes] = await Promise.all([
     sb.from('config_asistencia').select('*').eq('institucion_id', instId).eq('nivel', nivel).maybeSingle(),
-    sb.from('tipos_evaluacion').select('*').eq('institucion_id', instId).eq('nivel', nivel).order('nombre'),
+    sb.from('tipos_evaluacion').select('*').eq('institucion_id', instId).or(`nivel.eq.${nivel},nivel.is.null`).order('nombre'),
     sb.from('tipos_justificacion').select('*').eq('institucion_id', instId).eq('nivel', nivel).order('nombre'),
     sb.from('tipos_evento').select('*').eq('institucion_id', instId).order('nombre'),
     sb.from('periodos_evaluativos').select('*').eq('institucion_id', instId).eq('nivel', nivel).order('fecha_inicio'),
@@ -1337,13 +1393,35 @@ async function _renderParamNivel(nivel) {
     <div class="card">
       <div class="card-t">Períodos evaluativos</div>
       <div id="lista-periodos">
-        ${periodos.length ? periodos.map(p => `
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--brd);flex-wrap:wrap">
-            <div style="flex:1;font-size:12px;font-weight:500;min-width:100px">${_esc(p.nombre)}</div>
-            <input type="date" value="${p.fecha_inicio || ''}" onchange="_actualizarPeriodo('${p.id}','fecha_inicio',this.value)" style="width:130px">
-            <span style="color:var(--txt2);font-size:11px">a</span>
-            <input type="date" value="${p.fecha_fin || ''}" onchange="_actualizarPeriodo('${p.id}','fecha_fin',this.value)" style="width:130px">
-          </div>`).join('') : '<div style="color:var(--txt2);font-size:11px;padding:6px 0">Sin períodos definidos</div>'}
+        ${periodos.length ? periodos.map(p => {
+          const fmtFecha = iso => {
+            if (!iso) return '—';
+            const d = new Date(iso + 'T12:00:00');
+            return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+          };
+          return `
+          <div style="background:var(--surf2);border:1px solid var(--brd);border-radius:var(--rad);padding:12px 14px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="font-size:13px;font-weight:600">${_esc(p.nombre)}</div>
+              <button onclick="_eliminarPeriodo('${p.id}','${nivel}')"
+                style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--txt3);padding:0 2px;line-height:1" title="Eliminar">×</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <div class="adm-label">Inicio</div>
+                <input type="date" value="${p.fecha_inicio || ''}"
+                  onchange="_actualizarPeriodo('${p.id}','fecha_inicio',this.value)">
+                ${p.fecha_inicio ? `<div style="font-size:10px;color:var(--verde);margin-top:3px">${fmtFecha(p.fecha_inicio)}</div>` : ''}
+              </div>
+              <div>
+                <div class="adm-label">Fin</div>
+                <input type="date" value="${p.fecha_fin || ''}"
+                  onchange="_actualizarPeriodo('${p.id}','fecha_fin',this.value)">
+                ${p.fecha_fin ? `<div style="font-size:10px;color:var(--verde);margin-top:3px">${fmtFecha(p.fecha_fin)}</div>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('') : '<div style="color:var(--txt2);font-size:11px;padding:6px 0">Sin períodos definidos</div>'}
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
         <input type="text" id="new-periodo-${nivel}" placeholder="Ej: 1° Bimestre" style="flex:1">
@@ -1415,6 +1493,13 @@ async function _agregarTipo(tabla, inputId, nivel, listaId) {
 async function _actualizarPeriodo(id, campo, valor) {
   const { error } = await sb.from('periodos_evaluativos').update({ [campo]: valor || null }).eq('id', id);
   if (error) alert('Error al actualizar: ' + error.message);
+}
+
+async function _eliminarPeriodo(id, nivel) {
+  if (!confirm('¿Eliminar este período evaluativo?')) return;
+  const { error } = await sb.from('periodos_evaluativos').delete().eq('id', id);
+  if (error) { alert('Error: ' + error.message); return; }
+  await _renderParamNivel(nivel);
 }
 
 async function _agregarPeriodo(nivel) {

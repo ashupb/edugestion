@@ -31,6 +31,7 @@ const NAV_CONFIG = {
     { id:'notas',   icon:'≡',  label:'Calificaciones' },
     { sec: 'Institución' },
     { id:'leg',     icon:'▤',  label:'Resumen del estudiante' },
+    { id:'admin',   icon:'⊙',  label:'Configuración' },
   ],
   eoe: [
     { sec: 'General' },
@@ -67,6 +68,7 @@ const NAV_CONFIG = {
     { id:'prob',  icon:'△',   label:'Reportar situación' },
     { id:'obj',   icon:'◎',   label:'Objetivos' },
     { id:'leg',   icon:'▤',   label:'Resumen del estudiante' },
+    { id:'admin', icon:'⊙',   label:'Configuración' },
   ],
   admin: [
     { sec: 'General' },

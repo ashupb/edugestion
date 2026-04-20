@@ -256,3 +256,5 @@ create policy "asistencias_institucion" on asistencias
     )
   );
 
+
+
