@@ -288,6 +288,10 @@ body {
   transition: width .2s;
 }
 .sidebar.collapsed { width: 56px; }
+.sidebar.collapsed .sb-top { justify-content: center; padding: 14px 8px; gap: 0; }
+.sidebar.collapsed .sb-top > svg { display: none; }
+.sidebar.collapsed .sb-section { opacity: 0; height: 0; overflow: hidden; padding: 0; margin: 0; }
+.sidebar.collapsed .nav-it { justify-content: center; padding: 9px 4px; }
 
 /* Top: logo Kairos */
 .sb-top {

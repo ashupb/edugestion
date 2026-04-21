@@ -5,6 +5,9 @@
 let AGENDA_SEMANA_INICIO = _lunesDeHoy();
 let AGENDA_DIA_SEL       = new Date().toISOString().split('T')[0];
 let AGENDA_NIVEL         = 'todos';
+let AGENDA_VISTA         = 'semana';   // 'semana' | 'mes'
+let AGENDA_MES           = new Date().getMonth();
+let AGENDA_ANIO          = new Date().getFullYear();
 let TIPOS_EVENTO         = [];
 let USUARIOS_INST        = [];
 let _agendaEventosSem    = [];
@@ -73,6 +76,41 @@ async function rAgenda() {
   TIPOS_EVENTO  = tiposRes.data  || [];
   USUARIOS_INST = usuariosRes.data || [];
 
+  const puedeCrear = ['director_general','directivo_nivel','preceptor'].includes(rol);
+  const hoy = new Date().toISOString().split('T')[0];
+
+  const filtroTabsHTML = (rol === 'director_general' || rol === 'directivo_nivel') ? `
+    <div class="nivel-tabs-ag" style="margin-bottom:14px">
+      ${Object.entries(NIVEL_CONFIG).map(([k,v]) => `
+        <button class="nivel-tab-ag ${AGENDA_NIVEL===k?'on':''}"
+          style="${AGENDA_NIVEL===k?`background:${v.color};color:#fff;border-color:${v.color}`:''}"
+          onclick="setAgendaNivel('${k}')">${v.label}
+        </button>`).join('')}
+    </div>` : '';
+
+  const vistaToggle = `
+    <div style="display:flex;border:1px solid var(--brd);border-radius:var(--rad);overflow:hidden;flex-shrink:0">
+      <button onclick="setAgendaVista('semana')"
+        style="padding:5px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;font-family:inherit;
+          background:${AGENDA_VISTA==='semana'?'var(--verde)':'var(--surf)'};
+          color:${AGENDA_VISTA==='semana'?'#fff':'var(--txt2)'}">Semana</button>
+      <button onclick="setAgendaVista('mes')"
+        style="padding:5px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;font-family:inherit;
+          background:${AGENDA_VISTA==='mes'?'var(--verde)':'var(--surf)'};
+          color:${AGENDA_VISTA==='mes'?'#fff':'var(--txt2)'}">Mes</button>
+    </div>`;
+
+  if (AGENDA_VISTA === 'semana') {
+    await _rAgendaSemana(c, instId, puedeCrear, hoy, filtroTabsHTML, vistaToggle);
+  } else {
+    await _rAgendaMes(c, instId, rol, puedeCrear, filtroTabsHTML, vistaToggle);
+  }
+
+  inyectarEstilosAgenda();
+}
+
+// ─── VISTA SEMANA ─────────────────────────────────────
+async function _rAgendaSemana(c, instId, puedeCrear, hoy, filtroTabsHTML, vistaToggle) {
   const sabado = _addDias(AGENDA_SEMANA_INICIO, 5);
   const { data: eventos } = await sb
     .from('eventos_institucionales')
@@ -93,9 +131,6 @@ async function rAgenda() {
     AGENDA_DIA_SEL = AGENDA_SEMANA_INICIO;
   }
 
-  const puedeCrear = ['director_general','directivo_nivel','preceptor'].includes(rol);
-  const hoy = new Date().toISOString().split('T')[0];
-
   const dLunes  = new Date(AGENDA_SEMANA_INICIO + 'T12:00:00');
   const dSabado = new Date(sabado + 'T12:00:00');
   let tituloSem;
@@ -109,8 +144,8 @@ async function rAgenda() {
 
   const DIAS_TABS = ['Lun','Mar','Mié','Jue','Vie','Sáb'];
   const tabsDiaHTML = DIAS_TABS.map((lbl, i) => {
-    const iso  = _addDias(AGENDA_SEMANA_INICIO, i);
-    const d    = new Date(iso + 'T12:00:00');
+    const iso   = _addDias(AGENDA_SEMANA_INICIO, i);
+    const d     = new Date(iso + 'T12:00:00');
     const esSel = iso === AGENDA_DIA_SEL;
     const esHoy = iso === hoy;
     const tieneEvs = _agendaEventosSem.some(e => e.fecha_inicio === iso);
@@ -121,15 +156,6 @@ async function rAgenda() {
     </button>`;
   }).join('');
 
-  const filtroTabsHTML = (rol === 'director_general' || rol === 'directivo_nivel') ? `
-    <div class="nivel-tabs-ag" style="margin-bottom:14px">
-      ${Object.entries(NIVEL_CONFIG).map(([k,v]) => `
-        <button class="nivel-tab-ag ${AGENDA_NIVEL===k?'on':''}"
-          style="${AGENDA_NIVEL===k?`background:${v.color};color:#fff;border-color:${v.color}`:''}"
-          onclick="setAgendaNivel('${k}')">${v.label}
-        </button>`).join('')}
-    </div>` : '';
-
   c.innerHTML = `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <div>
@@ -137,8 +163,9 @@ async function rAgenda() {
         <div class="pg-s">Semana del ${tituloSem}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${vistaToggle}
         <button class="semana-nav-btn" onclick="cambiarSemana(-1)" title="Semana anterior">◀</button>
-        <button class="btn-s" style="font-size:11px;padding:6px 12px" onclick="irHoy()">Hoy</button>
+        <button class="btn-s" style="font-size:11px;padding:6px 10px" onclick="irHoy()">Hoy</button>
         <button class="semana-nav-btn" onclick="cambiarSemana(1)" title="Semana siguiente">▶</button>
         ${puedeCrear ? `<button class="btn-p" style="font-size:11px" onclick="abrirFormEvento()">+ Nuevo</button>` : ''}
       </div>
@@ -150,7 +177,107 @@ async function rAgenda() {
     <div id="agenda-lista-dia"></div>`;
 
   _renderEventosDia(_agendaEventosSem.filter(e => e.fecha_inicio === AGENDA_DIA_SEL));
-  inyectarEstilosAgenda();
+}
+
+// ─── VISTA MES ────────────────────────────────────────
+async function _rAgendaMes(c, instId, rol, puedeCrear, filtroTabsHTML, vistaToggle) {
+  // Sync month from week state
+  const d0 = new Date(AGENDA_SEMANA_INICIO + 'T12:00:00');
+  AGENDA_MES  = d0.getMonth();
+  AGENDA_ANIO = d0.getFullYear();
+
+  const primerDia = new Date(AGENDA_ANIO, AGENDA_MES, 1);
+  const ultimoDia = new Date(AGENDA_ANIO, AGENDA_MES + 1, 0);
+  const desde = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, 1);
+  const hasta  = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, ultimoDia.getDate());
+
+  let query = sb.from('eventos_institucionales')
+    .select('*, usuarios(nombre_completo)')
+    .eq('institucion_id', instId)
+    .gte('fecha_inicio', desde)
+    .lte('fecha_inicio', hasta)
+    .order('fecha_inicio');
+
+  if (rol === 'directivo_nivel') {
+    query = query.in('nivel', [USUARIO_ACTUAL.nivel, 'todos']);
+  }
+
+  const { data: eventos } = await query;
+
+  const eventosFiltrados = (eventos || []).filter(e => {
+    if (AGENDA_NIVEL === 'todos') return true;
+    if (!e.nivel || e.nivel === 'todos') return true;
+    return e.nivel.split(',').map(n => n.trim()).includes(AGENDA_NIVEL);
+  });
+
+  c.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="pg-t">Agenda institucional</div>
+        <div class="pg-s">${MESES_NOMBRES[AGENDA_MES]} ${AGENDA_ANIO}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${vistaToggle}
+        <button class="semana-nav-btn" onclick="cambiarMes(-1)" title="Mes anterior">◀</button>
+        <button class="btn-s" style="font-size:11px;padding:6px 10px" onclick="irHoy()">Hoy</button>
+        <button class="semana-nav-btn" onclick="cambiarMes(1)" title="Mes siguiente">▶</button>
+        ${puedeCrear ? `<button class="btn-p" style="font-size:11px" onclick="abrirFormEvento()">+ Nuevo</button>` : ''}
+      </div>
+    </div>
+    ${filtroTabsHTML}
+    <div id="form-evento"></div>
+    <div id="detalle-evento"></div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      ${buildCalGrid(eventosFiltrados, primerDia, ultimoDia)}
+    </div>`;
+}
+
+// ─── GRILLA MENSUAL ───────────────────────────────────
+function buildCalGrid(eventos, primerDia, ultimoDia) {
+  const evPorDia = {};
+  eventos.forEach(e => {
+    const d = e.fecha_inicio;
+    if (!evPorDia[d]) evPorDia[d] = [];
+    evPorDia[d].push(e);
+  });
+  Object.keys(evPorDia).forEach(d => {
+    evPorDia[d].sort((a,b) => (!a.hora?1:!b.hora?-1:a.hora.localeCompare(b.hora)));
+  });
+
+  const hoyISO = new Date().toISOString().split('T')[0];
+  const inicioSemana = primerDia.getDay();
+  const totalDias    = ultimoDia.getDate();
+
+  let html = `
+    <div class="cal-header-ag">
+      ${DIAS_NOMBRES.map(d=>`<div class="cal-th-ag">${d}</div>`).join('')}
+    </div>
+    <div class="cal-body-ag">`;
+
+  for (let i = 0; i < inicioSemana; i++) html += `<div class="cal-cell-ag empty"></div>`;
+
+  for (let dia = 1; dia <= totalDias; dia++) {
+    const fechaStr = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, dia);
+    const esHoy = fechaStr === hoyISO;
+    const evs   = evPorDia[fechaStr] || [];
+    html += `<div class="cal-cell-ag${esHoy?' hoy':''}">
+      <div class="cal-dia-num-ag${esHoy?' hoy':''}">${dia}</div>
+      ${evs.slice(0,3).map(e => {
+        const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
+        return `<div class="cal-ev-chip-ag"
+          style="background:${nc.bg};color:${nc.color};border-left:3px solid ${nc.color}"
+          onclick="verEvento('${e.id}')"
+          title="${e.hora?e.hora+' · ':''}${e.nombre}">
+          ${e.hora?`<span style="opacity:.7;margin-right:2px">${e.hora.slice(0,5)}</span>`:''}${e.nombre.length>18?e.nombre.slice(0,18)+'…':e.nombre}
+        </div>`;
+      }).join('')}
+      ${evs.length>3?`<div style="font-size:9px;color:var(--txt3);padding:1px 4px">+${evs.length-3} más</div>`:''}
+    </div>`;
+  }
+
+  const resto = (inicioSemana + totalDias) % 7;
+  if (resto > 0) for (let i = 0; i < 7-resto; i++) html += `<div class="cal-cell-ag empty"></div>`;
+  return html + `</div>`;
 }
 
 // ─── LISTA DE EVENTOS DEL DÍA ─────────────────────────
@@ -630,6 +757,21 @@ function cambiarSemana(delta) {
   rAgenda();
 }
 
+function cambiarMes(delta) {
+  AGENDA_MES += delta;
+  if (AGENDA_MES > 11) { AGENDA_MES = 0;  AGENDA_ANIO++; }
+  if (AGENDA_MES < 0)  { AGENDA_MES = 11; AGENDA_ANIO--; }
+  // Sync week state to first Monday of the month
+  const primero = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, 1);
+  AGENDA_SEMANA_INICIO = _lunesDe(primero);
+  rAgenda();
+}
+
+function setAgendaVista(v) {
+  AGENDA_VISTA = v;
+  rAgenda();
+}
+
 function irHoy() {
   AGENDA_SEMANA_INICIO = _lunesDeHoy();
   AGENDA_DIA_SEL = new Date().toISOString().split('T')[0];
@@ -706,6 +848,19 @@ function inyectarEstilosAgenda() {
     .chips-sel{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;min-height:24px;}
     .chip-sel{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:var(--azul-l);color:var(--azul);font-size:11px;border:1px solid var(--azul);}
     .chip-av-sm{width:16px;height:16px;border-radius:50%;background:var(--verde);color:#fff;font-size:8px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+    .cal-header-ag{display:grid;grid-template-columns:repeat(7,1fr);background:var(--surf2);border-bottom:1px solid var(--brd);}
+    .cal-th-ag{padding:8px 4px;text-align:center;font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;}
+    .cal-body-ag{display:grid;grid-template-columns:repeat(7,1fr);}
+    .cal-cell-ag{min-height:80px;padding:4px;border-right:1px solid var(--brd);border-bottom:1px solid var(--brd);}
+    .cal-cell-ag.empty{background:var(--surf2);opacity:.5;}
+    .cal-cell-ag.hoy{background:#f0f9f4;}
+    .dark .cal-cell-ag.hoy{background:#0f2a1a;}
+    .cal-dia-num-ag{font-size:11px;font-weight:600;margin-bottom:3px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;}
+    .cal-dia-num-ag.hoy{background:var(--verde);color:#fff;}
+    .cal-ev-chip-ag{font-size:9px;padding:2px 5px;border-radius:3px;margin-bottom:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .1s;font-weight:500;}
+    .cal-ev-chip-ag:hover{opacity:.75;}
+    @media(max-width:768px){.cal-cell-ag{min-height:44px;}.cal-ev-chip-ag{display:none;}}
   `;
   document.head.appendChild(st);
 }

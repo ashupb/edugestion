@@ -361,9 +361,6 @@ async function reabrirProb(probId) {
 
 // ─── FORMULARIO NUEVA PROBLEMÁTICA ────────────────────
 async function mostrarFormProb() {
-  const fc = document.getElementById('form-prob');
-  if (fc.innerHTML) { fc.innerHTML = ''; return; }
-
   const { data: usuarios } = await sb.from('usuarios')
     .select('id,nombre_completo,rol')
     .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
@@ -375,70 +372,80 @@ async function mostrarFormProb() {
     `<option value="${u.id}">${u.nombre_completo} (${labelRol(u.rol)})</option>`
   ).join('');
 
-  fc.innerHTML = `
-    <div class="card" style="margin-top:14px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:14px">Registrar nueva situación</div>
-
-      <div class="sec-lb">Nivel</div>
-      <select id="pb-nivel" onchange="onNivelProbChange(this.value)">
-        <option value="">— Seleccioná nivel —</option>
-        <option value="inicial">Inicial</option>
-        <option value="primario">Primario</option>
-        <option value="secundario">Secundario</option>
-      </select>
-
-      <div class="sec-lb" style="margin-top:10px">Curso</div>
-      <select id="pb-curso" onchange="onCursoProbChange(this.value)" disabled>
-        <option value="">— Primero seleccioná nivel —</option>
-      </select>
-
-      <div class="sec-lb" style="margin-top:10px">
-        Alumno/s <span style="font-weight:400;color:var(--txt3)">(podés seleccionar más de uno)</span>
+  document.getElementById('modal-form-prob')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-form-prob';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.46);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+  modal.innerHTML = `
+    <div style="background:var(--surf);border-radius:var(--rad-lg);width:100%;max-width:520px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.24)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--brd);flex-shrink:0">
+        <span style="font-size:14px;font-weight:700">Registrar nueva situación</span>
+        <button onclick="document.getElementById('modal-form-prob').remove()"
+          style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--txt2);padding:0 4px;line-height:1">×</button>
       </div>
-      <div id="pb-al-lista" style="border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf2);min-height:44px;max-height:200px;overflow-y:auto">
-        <div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>
-      </div>
-      <div id="pb-al-sel" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>
+      <div style="flex:1;overflow-y:auto;padding:16px 18px">
 
-      <div class="sec-lb" style="margin-top:10px">Tipo</div>
-      <div class="chip-row" id="pb-tipo">
-        ${TIPOS_LABEL_PROB.map((t, i) =>
-          `<div class="chip${i === 0 ? ' on' : ''}" onclick="selChipRow(this,'pb-tipo')">${t}</div>`
-        ).join('')}
-      </div>
+        <div class="sec-lb">Nivel</div>
+        <select id="pb-nivel" onchange="onNivelProbChange(this.value)">
+          <option value="">— Seleccioná nivel —</option>
+          <option value="inicial">Inicial</option>
+          <option value="primario">Primario</option>
+          <option value="secundario">Secundario</option>
+        </select>
 
-      <div class="sec-lb" style="margin-top:10px">Urgencia</div>
-      <div class="urg-row">
-        <div class="urg-b ua" data-u="alta"  onclick="selUrgProb(this)">Alta</div>
-        <div class="urg-b um" data-u="media" onclick="selUrgProb(this)">Media</div>
-        <div class="urg-b"   data-u="baja"  onclick="selUrgProb(this)">Baja</div>
-      </div>
+        <div class="sec-lb" style="margin-top:10px">Curso</div>
+        <select id="pb-curso" onchange="onCursoProbChange(this.value)" disabled>
+          <option value="">— Primero seleccioná nivel —</option>
+        </select>
 
-      <div class="sec-lb" style="margin-top:10px">Descripción</div>
-      <textarea id="pb-desc" rows="3" placeholder="Describí la situación observada..."></textarea>
-
-      <div class="sec-lb" style="margin-top:10px">Responsable de seguimiento</div>
-      <select id="pb-resp">
-        <option value="">— Sin asignar —</option>
-        ${responsablesOpts}
-      </select>
-
-      <div class="toggle-row-ui" style="margin-top:10px">
-        <div>
-          <div style="font-size:12px;font-weight:500">Confidencial</div>
-          <div style="font-size:10px;color:var(--txt2)">Solo visible para EOE y directivos</div>
+        <div class="sec-lb" style="margin-top:10px">
+          Alumno/s <span style="font-weight:400;color:var(--txt3)">(podés seleccionar más de uno)</span>
         </div>
-        <div class="tog on" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')">
-          <div class="tog-thumb"></div>
+        <div id="pb-al-lista" style="border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf2);min-height:44px;max-height:160px;overflow-y:auto">
+          <div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>
         </div>
-      </div>
+        <div id="pb-al-sel" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>
 
-      <div class="acc" style="margin-top:14px">
+        <div class="sec-lb" style="margin-top:10px">Tipo</div>
+        <div class="chip-row" id="pb-tipo">
+          ${TIPOS_LABEL_PROB.map((t, i) =>
+            `<div class="chip${i === 0 ? ' on' : ''}" onclick="selChipRow(this,'pb-tipo')">${t}</div>`
+          ).join('')}
+        </div>
+
+        <div class="sec-lb" style="margin-top:10px">Urgencia</div>
+        <div class="urg-row">
+          <div class="urg-b ua" data-u="alta"  onclick="selUrgProb(this)">Alta</div>
+          <div class="urg-b um" data-u="media" onclick="selUrgProb(this)">Media</div>
+          <div class="urg-b"   data-u="baja"  onclick="selUrgProb(this)">Baja</div>
+        </div>
+
+        <div class="sec-lb" style="margin-top:10px">Descripción</div>
+        <textarea id="pb-desc" rows="3" placeholder="Describí la situación observada..."></textarea>
+
+        <div class="sec-lb" style="margin-top:10px">Responsable de seguimiento</div>
+        <select id="pb-resp">
+          <option value="">— Sin asignar —</option>
+          ${responsablesOpts}
+        </select>
+
+        <div class="toggle-row-ui" style="margin-top:10px">
+          <div>
+            <div style="font-size:12px;font-weight:500">Confidencial</div>
+            <div style="font-size:10px;color:var(--txt2)">Solo visible para EOE y directivos</div>
+          </div>
+          <div class="tog on" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')">
+            <div class="tog-thumb"></div>
+          </div>
+        </div>
+
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--brd);flex-shrink:0">
+        <button class="btn-s" onclick="document.getElementById('modal-form-prob').remove()">Cancelar</button>
         <button class="btn-p" id="btn-guardar-prob" onclick="guardarProb()">Registrar y notificar</button>
-        <button class="btn-s" onclick="document.getElementById('form-prob').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
-
+  document.body.appendChild(modal);
   window._alumnosSelProb = [];
 }
 
@@ -580,7 +587,7 @@ async function guardarProb() {
     await crearAlertasProb(nueva.id, urg, nivel, alumno.id, respId);
   }
 
-  document.getElementById('form-prob').innerHTML = '';
+  document.getElementById('modal-form-prob')?.remove();
   window._alumnosSelProb = [];
   await rProb();
   cargarNotificaciones();

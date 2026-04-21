@@ -111,9 +111,10 @@ function _renderCardsObj() {
     const prog     = obj.progreso ?? obj.cumplimiento ?? 0;
     const incCount = obj.incs?.[0]?.count ?? 0;
     const semClr   = obj.estado==='en_riesgo'?'var(--rojo)':obj.estado==='logrado'?'var(--azul)':obj.estado==='archivado'?'var(--txt3)':'var(--verde)';
+    const esActivo = ['activo','en_riesgo'].includes(obj.estado);
     return `
-      <div class="card" style="margin-bottom:10px;cursor:pointer" onclick="_abrirDetalleObj('${obj.id}')">
-        <div style="display:flex;align-items:flex-start;gap:10px">
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:flex-start;gap:10px;cursor:pointer" onclick="_abrirDetalleObj('${obj.id}')">
           <div style="width:10px;height:10px;border-radius:50%;background:${semClr};margin-top:3px;flex-shrink:0"></div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px">
@@ -131,6 +132,13 @@ function _renderCardsObj() {
             <div class="bb"><div class="bf" style="width:${prog}%;background:${cat.color}"></div></div>
           </div>
         </div>
+        ${esActivo && _objPuedeRegistrarInc() ? `
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--brd);display:flex;gap:6px">
+          <button class="btn-s" style="font-size:10px;padding:4px 10px"
+            onclick="_abrirFormInc('${obj.id}')">+ Registrar incidente</button>
+          <button class="btn-s" style="font-size:10px;padding:4px 10px"
+            onclick="_abrirDetalleObj('${obj.id}')">Ver detalle →</button>
+        </div>` : ''}
       </div>`;
   }).join('');
 }
