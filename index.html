@@ -11,11 +11,12 @@
 <!-- LOGIN — genérico, sin nombre de institución hasta que el usuario ingresa -->
 <div id="login-screen">
   <div class="l-logo">
-    <svg viewBox="0 0 48 48" width="52" height="52" fill="none">
-      <rect width="48" height="48" rx="14" fill="#1a4a2e"/>
-      <path d="M12 24 L24 14 L36 24 L36 36 L12 36 Z" fill="none" stroke="#b8963e" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M19 36 L19 28 L24 24 L29 28 L29 36" fill="#b8963e"/>
-      <circle cx="24" cy="20" r="2.5" fill="#b8963e"/>
+    <svg viewBox="0 0 48 48" width="56" height="56" fill="none">
+      <circle cx="24" cy="24" r="22" stroke="#1B2B22" stroke-width="2.5"/>
+      <rect x="13" y="13" width="6" height="22" fill="#1B2B22"/>
+      <polygon points="19,24 19,13 33,13 25.5,24" fill="#1B2B22"/>
+      <polygon points="19,24 19,35 33,35 25.5,24" fill="#1B2B22"/>
+      <rect x="33" y="32" width="4" height="4" fill="#229957"/>
     </svg>
   </div>
   <div class="l-nombre">EduGestión</div>
@@ -66,8 +67,15 @@
   <div class="sidebar" id="sidebar">
     <div class="sb-top">
       <!-- Logo/nombre de la institución se carga dinámicamente -->
+      <svg viewBox="0 0 48 48" width="30" height="30" fill="none" style="flex-shrink:0">
+        <circle cx="24" cy="24" r="22" stroke="#229957" stroke-width="2.5"/>
+        <rect x="13" y="13" width="6" height="22" fill="#fff"/>
+        <polygon points="19,24 19,13 33,13 25.5,24" fill="#fff"/>
+        <polygon points="19,24 19,35 33,35 25.5,24" fill="#fff"/>
+        <rect x="33" y="32" width="4" height="4" fill="#229957"/>
+      </svg>
       <div class="sb-inst-logo" id="sb-inst-logo">E</div>
-      <span class="sb-nombre" id="sb-inst-nombre">EduGestión</span>
+      <span class="sb-nombre" id="sb-inst-nombre">[KAIROS]</span>
       <button class="sb-toggle" onclick="toggleSidebar()" title="Contraer menú"><span id="sb-toggle-icon">‹</span></button>
     </div>
     <div class="sb-user">
