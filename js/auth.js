@@ -73,6 +73,12 @@ async function login() {
     USUARIO_ACTUAL     = { ...data.user, ...perfil };
     INSTITUCION_ACTUAL = perfil.institucion;
 
+    // Si aún no tiene institución asignada → pantalla de configuración inicial
+    if (!USUARIO_ACTUAL.institucion_id) {
+      iniciarSetupInstitucional();
+      return;
+    }
+
     iniciarApp();
 
   } catch (e) {
@@ -111,6 +117,13 @@ async function verificarSesion() {
   if (perfil && perfil.activo) {
     USUARIO_ACTUAL     = { ...session.user, ...perfil };
     INSTITUCION_ACTUAL = perfil.institucion;
+
+    // Si aún no tiene institución asignada → pantalla de configuración inicial
+    if (!USUARIO_ACTUAL.institucion_id) {
+      iniciarSetupInstitucional();
+      return;
+    }
+
     iniciarApp();
   } else {
     await sb.auth.signOut();

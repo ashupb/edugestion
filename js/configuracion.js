@@ -622,22 +622,29 @@ async function _renderCursos() {
 async function _abrirModalCurso(cursoId) {
   const curso = cursoId ? _adminCursos.find(c => c.id === cursoId) : null;
 
-  const { data: precs } = await sb.from('usuarios')
-    .select('id,nombre_completo,nivel')
-    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-    .eq('rol', 'preceptor').eq('activo', true).order('nombre_completo');
+  const [precsRes, orientsRes] = await Promise.all([
+    sb.from('usuarios')
+      .select('id,nombre_completo,nivel')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .eq('rol', 'preceptor').eq('activo', true).order('nombre_completo'),
+    sb.from('orientaciones').select('id,nombre').eq('activo', true).order('nombre'),
+  ]);
+
+  const precs   = precsRes.data || [];
+  const orients = orientsRes.data || [];
 
   const niveles   = USUARIO_ACTUAL.rol === 'directivo_nivel' ? [USUARIO_ACTUAL.nivel] : ['inicial', 'primario', 'secundario'];
   const nivelSel  = curso?.nivel || niveles[0];
-  const precsDisp = (precs || []).filter(p => !nivelSel || p.nivel === nivelSel);
+  const precsDisp = precs.filter(p => !nivelSel || p.nivel === nivelSel);
   const anioActual = new Date().getFullYear();
+  const esAnioAlto = /^[456]/.test((curso?.nombre || '').trim());
 
   _crearModal(
     cursoId ? 'Editar curso' : 'Nuevo curso',
     `
     <div class="adm-form-row">
       <label class="adm-label">Nombre (ej: 3°, Sala 5)</label>
-      <input type="text" id="mc-nombre" value="${_esc(curso?.nombre)}" placeholder="Ej: 3°">
+      <input type="text" id="mc-nombre" value="${_esc(curso?.nombre)}" placeholder="Ej: 3°" oninput="_toggleOrientacion()">
     </div>
     <div class="adm-form-row">
       <label class="adm-label">División</label>
@@ -653,6 +660,13 @@ async function _abrirModalCurso(cursoId) {
       <label class="adm-label">Año lectivo</label>
       <input type="number" id="mc-anio" value="${curso?.ciclo_lectivo || curso?.anio || anioActual}" min="2020" max="2050" style="max-width:120px">
     </div>
+    <div class="adm-form-row" id="mc-orient-row" style="display:${esAnioAlto ? '' : 'none'}">
+      <label class="adm-label">Orientación</label>
+      <select id="mc-orientacion">
+        <option value="">— Sin orientación —</option>
+        ${orients.map(o => `<option value="${o.id}" ${o.id === curso?.orientacion_id ? 'selected' : ''}>${_esc(o.nombre)}</option>`).join('')}
+      </select>
+    </div>
     <div class="adm-form-row">
       <label class="adm-label">Preceptor asignado</label>
       <select id="mc-prec">
@@ -665,23 +679,33 @@ async function _abrirModalCurso(cursoId) {
   );
 }
 
+function _toggleOrientacion() {
+  const nombre = document.getElementById('mc-nombre')?.value?.trim() || '';
+  const row    = document.getElementById('mc-orient-row');
+  if (row) row.style.display = /^[456]/.test(nombre) ? '' : 'none';
+}
+
 async function _guardarCurso(cursoId) {
-  const nombre       = document.getElementById('mc-nombre')?.value?.trim();
-  const division     = document.getElementById('mc-division')?.value?.trim();
-  const nivel        = document.getElementById('mc-nivel')?.value;
+  const nombre        = document.getElementById('mc-nombre')?.value?.trim();
+  const division      = document.getElementById('mc-division')?.value?.trim();
+  const nivel         = document.getElementById('mc-nivel')?.value;
   const ciclo_lectivo = parseInt(document.getElementById('mc-anio')?.value);
-  const preceptor_id = document.getElementById('mc-prec')?.value || null;
+  const preceptor_id  = document.getElementById('mc-prec')?.value || null;
+  const orientRow     = document.getElementById('mc-orient-row');
+  const orientacion_id = (orientRow && orientRow.style.display !== 'none')
+    ? (document.getElementById('mc-orientacion')?.value || null)
+    : null;
 
   if (!nombre) { alert('El nombre del curso es requerido.'); return; }
   if (!nivel)  { alert('El nivel es requerido.'); return; }
 
   try {
     if (cursoId) {
-      const { error } = await sb.from('cursos').update({ nombre, division, nivel, ciclo_lectivo, preceptor_id }).eq('id', cursoId);
+      const { error } = await sb.from('cursos').update({ nombre, division, nivel, ciclo_lectivo, preceptor_id, orientacion_id }).eq('id', cursoId);
       if (error) throw error;
     } else {
       const { data: nuevo, error } = await sb.from('cursos').insert([{
-        nombre, division, nivel, ciclo_lectivo, anio: ciclo_lectivo, preceptor_id,
+        nombre, division, nivel, ciclo_lectivo, anio: ciclo_lectivo, preceptor_id, orientacion_id,
         institucion_id: USUARIO_ACTUAL.institucion_id, activo: true,
       }]).select().single();
       if (error) throw error;
@@ -1165,9 +1189,10 @@ async function _desactivarMateria(materiaId) {
 // ══════════════════════════════════════════════════════
 // SECCIÓN: ASIGNACIONES
 // ══════════════════════════════════════════════════════
-let _admAsigCursoSel   = null;
-let _admAsigVistaPor   = 'curso';
-let _admAsigDocenteSel = null;
+let _admAsigCursoSel    = null;
+let _admAsigVistaPor    = 'curso';
+let _admAsigDocenteSel  = null;
+let _admAsigAnioLectivo = new Date().getFullYear();
 
 async function _renderAsignaciones() {
   const sec = document.getElementById('adm-section-content');
@@ -1196,9 +1221,17 @@ async function _renderAsignaciones() {
   window._admAsigDocentes = docentes;
 
   sec.innerHTML = `
-    <div class="chip-row" style="margin-bottom:14px">
-      <div class="chip${_admAsigVistaPor === 'curso'   ? ' on' : ''}" onclick="_admAsigVista('curso')">Por curso</div>
-      <div class="chip${_admAsigVistaPor === 'docente' ? ' on' : ''}" onclick="_admAsigVista('docente')">Por docente</div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+      <div class="chip-row" style="margin:0">
+        <div class="chip${_admAsigVistaPor === 'curso'   ? ' on' : ''}" onclick="_admAsigVista('curso')">Por curso</div>
+        <div class="chip${_admAsigVistaPor === 'docente' ? ' on' : ''}" onclick="_admAsigVista('docente')">Por docente</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label class="adm-label" style="margin:0;white-space:nowrap">Año lectivo</label>
+        <input type="number" id="asig-anio-sel" value="${_admAsigAnioLectivo}" min="2020" max="2050"
+          style="max-width:88px;padding:6px 10px;border:1px solid var(--brd);border-radius:6px;font-size:12px;background:var(--bg);color:var(--txt)"
+          onchange="_admAsigAnioLectivo=parseInt(this.value)||new Date().getFullYear();_renderAsigContent()">
+      </div>
     </div>
     <div id="adm-asig-content"></div>`;
 
@@ -1225,8 +1258,8 @@ async function _renderAsigContent() {
   if (_admAsigVistaPor === 'curso') {
     const cursoSel = cursos.find(c => c.id === _admAsigCursoSel);
 
-    const { data: asigns } = await sb.from('docente_cursos')
-      .select('*').eq('curso_id', _admAsigCursoSel || '');
+    const { data: asigns } = await sb.from('asignaciones')
+      .select('*').eq('curso_id', _admAsigCursoSel || '').eq('anio_lectivo', _admAsigAnioLectivo);
     const asigMap = {};
     (asigns || []).forEach(a => { asigMap[a.materia_id] = a.docente_id; });
 
@@ -1257,9 +1290,8 @@ async function _renderAsigContent() {
         </div>
       </div>`}`;
   } else {
-    const { data: asigns } = await sb.from('docente_cursos')
-      .select('*, materia:materias(id,nombre), curso:cursos(id,nombre,division,nivel)')
-      .eq('docente_id', _admAsigDocenteSel || '');
+    const { data: asigns } = await sb.from('asignaciones_detalle')
+      .select('*').eq('docente_id', _admAsigDocenteSel || '').eq('anio_lectivo', _admAsigAnioLectivo);
 
     cont.innerHTML = `
       <div class="adm-form-row">
@@ -1273,8 +1305,8 @@ async function _renderAsigContent() {
         ${(asigns || []).map(a => `
           <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--brd)">
             <div style="flex:1">
-              <div style="font-size:12px;font-weight:500">${_esc(a.materia?.nombre) || '—'}</div>
-              <div style="font-size:10px;color:var(--txt2)">${_esc(a.curso?.nombre) || ''}${a.curso?.division || ''} · ${NIVEL_LABELS_ADM[a.curso?.nivel] || ''}</div>
+              <div style="font-size:12px;font-weight:500">${_esc(a.materia) || '—'}</div>
+              <div style="font-size:10px;color:var(--txt2)">${_esc(a.curso_nombre) || ''}${a.curso_division || ''} · ${NIVEL_LABELS_ADM[a.curso_nivel] || ''}</div>
             </div>
           </div>`).join('')}
       </div>`}`;
@@ -1282,20 +1314,21 @@ async function _renderAsigContent() {
 }
 
 async function _guardarAsignaciones() {
-  const cursoId   = _admAsigCursoSel;
+  const cursoId    = _admAsigCursoSel;
   const materiaIds = window._admAsigMateriaIds || [];
-  if (!cursoId) return;
+  if (!cursoId || !materiaIds.length) return;
 
   const upserts = [];
   materiaIds.forEach(mId => {
     const docenteId = document.getElementById('asig-' + mId)?.value;
-    if (docenteId) upserts.push({ curso_id: cursoId, materia_id: mId, docente_id: docenteId, institucion_id: USUARIO_ACTUAL.institucion_id });
+    if (docenteId) upserts.push({ curso_id: cursoId, materia_id: mId, docente_id: docenteId, anio_lectivo: _admAsigAnioLectivo });
   });
 
   try {
-    await sb.from('docente_cursos').delete().eq('curso_id', cursoId).in('materia_id', materiaIds);
+    await sb.from('asignaciones').delete()
+      .eq('curso_id', cursoId).eq('anio_lectivo', _admAsigAnioLectivo).in('materia_id', materiaIds);
     if (upserts.length) {
-      const { error } = await sb.from('docente_cursos').insert(upserts);
+      const { error } = await sb.from('asignaciones').insert(upserts);
       if (error) throw error;
     }
     alert('Asignaciones guardadas correctamente.');

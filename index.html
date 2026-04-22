@@ -60,6 +60,63 @@
   </div>
 </div>
 
+<!-- SETUP: primer inicio sin institución -->
+<div id="setup-screen" style="display:none">
+  <div class="l-logo">
+    <svg viewBox="0 0 48 48" width="56" height="56" fill="none">
+      <circle cx="24" cy="24" r="22" stroke="#1B2B22" stroke-width="2.5"/>
+      <rect x="13" y="13" width="6" height="22" fill="#1B2B22"/>
+      <polygon points="19,24 19,13 33,13 25.5,24" fill="#1B2B22"/>
+      <polygon points="19,24 19,35 33,35 25.5,24" fill="#1B2B22"/>
+      <rect x="33" y="32" width="4" height="4" fill="#229957"/>
+    </svg>
+  </div>
+  <div class="l-nombre">Bienvenido a Kairos</div>
+  <div class="l-sub">Antes de continuar, configurá tu institución</div>
+
+  <div class="l-card" style="max-width:420px">
+    <div class="l-card-t">Configuración inicial</div>
+    <div class="l-card-s">Esta información se puede editar después desde Configuración</div>
+
+    <div id="setup-error" class="login-error" style="display:none"></div>
+
+    <div class="l-form" style="display:grid;gap:10px;margin-top:14px">
+      <div>
+        <label class="l-label">Nombre de la institución *</label>
+        <input type="text" id="setup-nombre" placeholder="Ej: Escuela N° 12 Juan Manuel de Rosas" autocomplete="organization">
+      </div>
+      <div>
+        <label class="l-label">Localidad</label>
+        <input type="text" id="setup-localidad" placeholder="Ej: Buenos Aires">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <label class="l-label">Nivel educativo</label>
+          <select id="setup-nivel" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;color:#1a2530">
+            <option value="">General</option>
+            <option value="inicial">Inicial</option>
+            <option value="primaria">Primaria</option>
+            <option value="secundaria">Secundaria</option>
+            <option value="terciaria">Terciaria</option>
+          </select>
+        </div>
+        <div>
+          <label class="l-label">Año lectivo</label>
+          <input type="number" id="setup-anio" min="2020" max="2040" style="width:100%;box-sizing:border-box">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-ing" id="btn-setup" onclick="guardarInstitucion()" style="margin-top:18px">
+      <span id="btn-setup-text">Completar configuración</span>
+    </button>
+
+    <div class="l-hint" style="margin-top:12px">
+      ¿No sos el administrador? Pedile al director que complete este paso.
+    </div>
+  </div>
+</div>
+
 <!-- SHELL: visible tras login exitoso -->
 <div id="shell" style="display:none">
 
@@ -163,6 +220,7 @@
 <script src="js/configuracion.js"></script>
 
 <!-- Auth y arranque (siempre al final) -->
+<script src="js/setup.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/main.js"></script>
 

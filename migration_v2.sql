@@ -208,4 +208,31 @@ alter table cursos add column if not exists ciclo_lectivo int;
 update cursos set ciclo_lectivo = extract(year from created_at)::int
   where ciclo_lectivo is null;
 
+-- ── 12. RLS PARA instituciones ───────────────────────
+-- Sin estas políticas, el setup inicial falla al crear la institución
+
+-- Cualquier usuario autenticado puede crear una institución nueva
+drop policy if exists "instituciones_insert_auth" on instituciones;
+create policy "instituciones_insert_auth" on instituciones
+  for insert with check (auth.uid() is not null);
+
+-- Cada usuario puede ver solo su propia institución
+drop policy if exists "instituciones_select_propia" on instituciones;
+create policy "instituciones_select_propia" on instituciones
+  for select using (
+    id in (select institucion_id from usuarios where id = auth.uid())
+  );
+
+-- El usuario puede actualizar los datos de su propia institución
+drop policy if exists "instituciones_update_propia" on instituciones;
+create policy "instituciones_update_propia" on instituciones
+  for update using (
+    id in (select institucion_id from usuarios where id = auth.uid())
+  );
+
+-- ── 13. COLUMNA username EN usuarios ─────────────────
+-- Usada para login con nombre de usuario en lugar de email
+alter table usuarios add column if not exists username  text unique;
+alter table usuarios add column if not exists email     text;
+
 -- ── FIN DE MIGRACIÓN ──────────────────────────────────
