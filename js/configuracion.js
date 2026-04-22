@@ -615,20 +615,39 @@ async function _guardarUsuario(userId, esNuevo) {
           'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
           'apikey': SUPABASE_SERVICE_KEY,
         },
-        body: JSON.stringify({ email, password: dni, email_confirm: true }),
+        body: JSON.stringify({
+          email,
+          password: dni,
+          email_confirm: true,
+          user_metadata: {
+            nombre_completo,
+            username,
+            rol,
+            nivel:          nivel || '',
+            activo:         activo,
+            dni:            dni || '',
+            institucion_id: USUARIO_ACTUAL.institucion_id,
+            cursos_ids:     cursos_ids.length ? cursos_ids : [],
+          },
+        }),
       });
       const authData = await resp.json();
       if (authData.error || !authData.id) {
         throw new Error(authData.error?.message || authData.msg || 'Error al crear usuario en Auth');
       }
-
-      const { error: insErr } = await sb.from('usuarios').insert([{
-        id: authData.id,
-        nombre_completo, username, email, rol, nivel, activo, dni,
-        cursos_ids: cursos_ids.length ? cursos_ids : null,
-        institucion_id: USUARIO_ACTUAL.institucion_id,
-      }]);
-      if (insErr) throw insErr;
+      // El trigger handle_new_user() ya insertó la fila en public.usuarios.
+      // Verificamos que esté y actualizamos si cursos_ids quedó vacío.
+      if (cursos_ids.length) {
+        await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${authData.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+            'apikey': SUPABASE_SERVICE_KEY,
+          },
+          body: JSON.stringify({ cursos_ids }),
+        });
+      }
     } else {
       const updatePayload = {
         nombre_completo, rol, nivel, activo, dni: dni || null,

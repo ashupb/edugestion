@@ -192,7 +192,70 @@ alter table instituciones add column if not exists logo_url text;
 --   for update using (auth.uid() = id or
 --     institucion_id in (select institucion_id from usuarios where id = auth.uid()));
 
--- ── 8. RECARGAR SCHEMA CACHE DE SUPABASE ─────────────
+-- ── 8. TRIGGER: auto-insert en public.usuarios ───────
+-- Cuando Supabase crea un auth user, este trigger inserta
+-- automáticamente en public.usuarios leyendo user_metadata.
+-- SECURITY DEFINER = corre como superuser, evita RLS.
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  meta jsonb := new.raw_user_meta_data;
+begin
+  insert into public.usuarios (
+    id,
+    email,
+    nombre_completo,
+    username,
+    rol,
+    nivel,
+    activo,
+    dni,
+    institucion_id,
+    cursos_ids
+  ) values (
+    new.id,
+    new.email,
+    coalesce(meta->>'nombre_completo', ''),
+    coalesce(meta->>'username', split_part(new.email, '@', 1)),
+    coalesce(meta->>'rol', 'docente'),
+    nullif(meta->>'nivel', ''),
+    coalesce((meta->>'activo')::boolean, true),
+    nullif(meta->>'dni', ''),
+    nullif(meta->>'institucion_id', '')::uuid,
+    case
+      when jsonb_array_length(meta->'cursos_ids') > 0
+      then array(select jsonb_array_elements_text(meta->'cursos_ids'))::uuid[]
+      else null
+    end
+  )
+  on conflict (id) do nothing;
+  return new;
+exception when others then
+  -- Nunca interrumpir el flujo de auth por errores aquí
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- ── 9. POLÍTICA INSERT para usuarios (respaldo) ───────
+drop policy if exists "usuarios_insert_admin" on usuarios;
+create policy "usuarios_insert_admin" on usuarios
+  for insert with check (
+    institucion_id in (
+      select institucion_id from usuarios where id = auth.uid()
+    )
+  );
+
+-- ── 10. RECARGAR SCHEMA CACHE DE SUPABASE ────────────
 notify pgrst, 'reload schema';
 
 -- ── FIN DE MIGRACIÓN ──────────────────────────────────
