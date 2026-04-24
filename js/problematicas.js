@@ -1,5 +1,5 @@
 // =====================================================
-// PROBLEMATICAS.JS — v2
+// PROBLEMATICAS.JS — v3 (soporte grupal)
 // =====================================================
 
 let _probFiltros = { estado: 'activas', urgencia: 'todas', nivel: 'todos' };
@@ -39,7 +39,6 @@ function puedeAgregarSeg(prob) {
   return perm.agregarSeg || (prob && prob.responsable_id === USUARIO_ACTUAL.id);
 }
 
-// Detecta si las columnas de la migración v2 ya existen en el schema
 let _probMigracionOk = null;
 async function detectarMigracion() {
   if (_probMigracionOk !== null) return _probMigracionOk;
@@ -50,32 +49,28 @@ async function detectarMigracion() {
 
 // ─── DATA FETCH CON PERMISOS ──────────────────────────
 async function getProblematicasData() {
-  const perm        = probPermisos();
-  const instId      = USUARIO_ACTUAL.institucion_id;
-  const f           = _probFiltros;
-  const migOk       = await detectarMigracion();
+  const perm   = probPermisos();
+  const instId = USUARIO_ACTUAL.institucion_id;
+  const f      = _probFiltros;
+  const migOk  = await detectarMigracion();
 
-  // SELECT base — con o sin columnas de v2
   const selectBase = `*,
+    alumnos_grupo:problematica_alumnos(alumno_id),
     alumno:alumnos(id,nombre,apellido,curso:cursos(id,nombre,division${migOk ? ',nivel' : ''})),
     registrado_por_usuario:usuarios!problematicas_registrado_por_fkey(id,nombre_completo)
     ${migOk ? ',responsable:usuarios!problematicas_responsable_id_fkey(id,nombre_completo)' : ''}`;
 
   let q = sb.from('problematicas')
     .select(selectBase)
-    .eq('institucion_id', instId);
+    .eq('institucion_id', instId)
+    .is('problematica_madre_id', null);
 
-  // Filtro estado
   if (f.estado === 'activas')    q = q.in('estado', ['abierta','en_seguimiento']);
   else if (f.estado !== 'todas') q = q.eq('estado', f.estado);
 
-  // Filtro urgencia
   if (f.urgencia !== 'todas') q = q.eq('urgencia', f.urgencia);
-
-  // Filtro nivel solo si migración aplicada
   if (migOk && f.nivel !== 'todos') q = q.eq('nivel', f.nivel);
 
-  // Filtro por rol
   if (perm.soloPropias) {
     q = q.eq('registrado_por', USUARIO_ACTUAL.id);
   } else if (perm.soloCursos) {
@@ -95,18 +90,20 @@ async function getProblematicasData() {
 async function rProb() {
   showLoading('prob');
   try {
-    await detectarMigracion();              // inicializa _probMigracionOk antes de renderizar
-    const q              = await getProblematicasData();
+    await detectarMigracion();
+    const q               = await getProblematicasData();
     const { data, error } = await q;
     if (error) throw error;
 
     let lista = data || [];
     if (USUARIO_ACTUAL.rol === 'preceptor') {
-      // Filtrar por nivel del preceptor
       if (USUARIO_ACTUAL.nivel) {
-        lista = lista.filter(p => p.alumno?.curso?.nivel === USUARIO_ACTUAL.nivel);
+        lista = lista.filter(p => {
+          const mod = p.modalidad || 'individual';
+          if (mod === 'grupal' || mod === 'curso') return p.nivel === USUARIO_ACTUAL.nivel;
+          return p.alumno?.curso?.nivel === USUARIO_ACTUAL.nivel;
+        });
       }
-      // Ocultar confidenciales salvo que sea responsable
       lista = lista.filter(p => !p.confidencial || p.responsable_id === USUARIO_ACTUAL.id);
     }
     window._probCache = lista;
@@ -176,28 +173,46 @@ async function setFiltroProb(campo, valor) {
 function renderListaProb(lista) {
   if (!lista.length) return '<div class="empty-state">✓<br>No hay problemáticas con los filtros aplicados</div>';
   return lista.map(p => {
-    const open   = EX === 'pr-' + p.id;
-    const ini    = (p.alumno?.apellido?.[0] || '?') + (p.alumno?.nombre?.[0] || '');
-    const nom    = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
-    const curso  = p.alumno?.curso;
-    const cur    = curso ? `${curso.nombre} ${curso.division || ''}`.trim() : '—';
-    const nivel  = p.nivel || curso?.nivel || '';
+    const open      = EX === 'pr-' + p.id;
+    const modalidad = p.modalidad || 'individual';
+    const esGrupal  = modalidad === 'grupal' || modalidad === 'curso';
+
+    let ini, nom, cur;
+    if (esGrupal) {
+      const contAlumnos = (p.alumnos_grupo || []).length;
+      ini = modalidad === 'curso' ? 'CC' : 'GR';
+      nom = modalidad === 'curso'
+        ? `Curso completo · ${contAlumnos} alumno${contAlumnos !== 1 ? 's' : ''}`
+        : `Grupal · ${contAlumnos} alumno${contAlumnos !== 1 ? 's' : ''}`;
+      cur = p.nivel ? p.nivel[0].toUpperCase() + p.nivel.slice(1) : '—';
+    } else {
+      ini = (p.alumno?.apellido?.[0] || '?') + (p.alumno?.nombre?.[0] || '');
+      nom = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
+      const curso = p.alumno?.curso;
+      cur = curso ? `${curso.nombre} ${curso.division || ''}`.trim() : '—';
+    }
+
+    const nivel  = p.nivel || p.alumno?.curso?.nivel || '';
     const resp   = p.responsable?.nombre_completo;
     const urgCls = p.urgencia === 'alta' ? 'ua' : p.urgencia === 'media' ? 'um' : 'ub';
     const urgTag = p.urgencia === 'alta' ? 'tr' : p.urgencia === 'media' ? 'ta' : 'tg';
     const estCls = p.estado === 'abierta' ? 'tr' : p.estado === 'en_seguimiento' ? 'ta' : 'tg';
     const estLbl = { abierta:'Sin atender', en_seguimiento:'En seguimiento', cerrada:'Cerrada', resuelta:'Cerrada', derivada:'Derivada' }[p.estado] || p.estado;
+    const avBg   = esGrupal ? 'var(--azul-l)' : 'var(--rojo-l)';
+    const avCl   = esGrupal ? 'var(--azul)'   : 'var(--rojo)';
+
     return `
       <div class="caso-c ${urgCls}">
         <div class="caso-top" onclick="togProb('pr-${p.id}')">
-          <div class="av av32" style="background:var(--rojo-l);color:var(--rojo)">${ini}</div>
+          <div class="av av32" style="background:${avBg};color:${avCl};font-size:10px;font-weight:700">${ini}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:12px;font-weight:600">${nom}</div>
-            <div style="font-size:10px;color:var(--txt2)">${cur}${nivel ? ' · ' + nivel[0].toUpperCase() + nivel.slice(1) : ''} · ${labelTipoProb(p.tipo)}</div>
+            <div style="font-size:10px;color:var(--txt2)">${cur}${nivel && !esGrupal ? ' · ' + nivel[0].toUpperCase() + nivel.slice(1) : ''} · ${labelTipoProb(p.tipo)}</div>
             <div style="font-size:10px;color:var(--txt3);margin-top:1px">${resp ? 'Resp: ' + resp + ' · ' : ''}${tiempoDesde(p.created_at)}</div>
             <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
               <span class="tag ${urgTag}">Urgencia ${p.urgencia}</span>
               <span class="tag ${estCls}">${estLbl}</span>
+              ${esGrupal ? `<span class="tag td">${modalidad === 'curso' ? 'Curso' : 'Grupal'}</span>` : ''}
               ${p.confidencial ? '<span class="tag td">Confidencial</span>' : ''}
             </div>
           </div>
@@ -224,13 +239,49 @@ async function togProb(key) {
 async function cargarDetProb(probId) {
   const det  = document.getElementById('det-' + probId);
   if (!det) return;
-  const prob = (window._probCache || []).find(p => p.id === probId);
+  const prob      = (window._probCache || []).find(p => p.id === probId);
+  const modalidad = prob?.modalidad || 'individual';
+  const esGrupal  = modalidad === 'grupal' || modalidad === 'curso';
 
   const { data: intvs } = await sb
     .from('intervenciones')
     .select('*, usr:usuarios!intervenciones_registrado_por_fkey(nombre_completo)')
     .eq('problematica_id', probId)
     .order('created_at', { ascending: true });
+
+  let hijasHTML = '';
+  if (esGrupal) {
+    const { data: hijas } = await sb
+      .from('problematicas')
+      .select('id, estado, alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division))')
+      .eq('problematica_madre_id', probId)
+      .order('created_at');
+
+    if (hijas?.length) {
+      const eCls = e => e === 'abierta' ? 'tr' : e === 'en_seguimiento' ? 'ta' : 'tg';
+      const eLbl = e => ({ abierta:'Sin atender', en_seguimiento:'Seguimiento', cerrada:'Cerrada', resuelta:'Cerrada', derivada:'Derivada' }[e] || e);
+      hijasHTML = `
+        <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          Alumnos involucrados (${hijas.length})
+        </div>
+        ${hijas.map(h => {
+          const al  = h.alumno;
+          const nom = al ? `${al.apellido}, ${al.nombre}` : '—';
+          const cur = al?.curso ? `${al.curso.nombre} ${al.curso.division || ''}`.trim() : '';
+          return `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd)">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11px;font-weight:600">${nom}</div>
+                ${cur ? `<div style="font-size:10px;color:var(--txt2)">${cur}</div>` : ''}
+              </div>
+              <span class="tag ${eCls(h.estado)}" style="font-size:9px;flex-shrink:0">${eLbl(h.estado)}</span>
+              <button class="btn-s" style="font-size:10px;padding:3px 8px;flex-shrink:0"
+                onclick="abrirDetalleHija('${h.id}')">Ver →</button>
+            </div>`;
+        }).join('')}
+        <div style="margin-bottom:14px"></div>`;
+    }
+  }
 
   const perm     = probPermisos();
   const puedeSeg = puedeAgregarSeg(prob);
@@ -256,12 +307,14 @@ async function cargarDetProb(probId) {
       ${prob?.descripcion ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5;padding:8px 10px;background:var(--surf);border-radius:var(--rad);margin-bottom:10px">${prob.descripcion}</div>` : ''}
       ${cerrada && prob?.motivo_cierre ? `<div style="background:var(--verde-l);border-radius:var(--rad);padding:8px 10px;margin-bottom:10px;font-size:11px"><span style="font-weight:600;color:var(--verde)">Cerrada</span> · ${prob.motivo_cierre}${prob.cerrado_at ? ' · ' + formatFechaLatam(prob.cerrado_at.split('T')[0]) : ''}</div>` : ''}
 
-      <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora de seguimiento</div>
+      ${hijasHTML}
+
+      <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora${esGrupal ? ' grupal' : ' de seguimiento'}</div>
       ${invsHTML}
 
       ${puedeSeg && !cerrada ? `
       <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
-        <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento</div>
+        <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento${esGrupal ? ' grupal' : ''}</div>
         <textarea id="id-${probId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
         <input type="text" id="ip-${probId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
         <div class="acc" style="margin-top:8px">
@@ -275,6 +328,121 @@ async function cargarDetProb(probId) {
       </div>
       <div id="cierre-form-${probId}"></div>
     </div>`;
+}
+
+// ─── DETALLE HIJA (modal) ─────────────────────────────
+async function abrirDetalleHija(hijaId) {
+  const { data: hija } = await sb
+    .from('problematicas')
+    .select(`*,
+      alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division)),
+      responsable:usuarios!problematicas_responsable_id_fkey(id,nombre_completo)`)
+    .eq('id', hijaId)
+    .single();
+
+  const { data: intvs } = await sb
+    .from('intervenciones')
+    .select('*, usr:usuarios!intervenciones_registrado_por_fkey(nombre_completo)')
+    .eq('problematica_id', hijaId)
+    .order('created_at', { ascending: true });
+
+  if (!hija) return;
+
+  const perm    = probPermisos();
+  const cerrada = hija.estado === 'cerrada' || hija.estado === 'resuelta' || hija.estado === 'derivada';
+  const nom     = hija.alumno ? `${hija.alumno.apellido}, ${hija.alumno.nombre}` : '—';
+  const cur     = hija.alumno?.curso ? `${hija.alumno.curso.nombre} ${hija.alumno.curso.division || ''}`.trim() : '';
+  const madreId = hija.problematica_madre_id;
+
+  const dotColor = t => t === 'Caso cerrado' ? 'var(--verde)' : t === 'Caso reabierto' ? 'var(--ambar)' : 'var(--azul)';
+  const invsHTML = (intvs || []).length
+    ? intvs.map(iv => `
+        <div class="tl-it">
+          <div class="tl-d" style="background:${dotColor(iv.titulo)}"></div>
+          <div class="tl-f">${formatFechaCorta(iv.created_at)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="tl-t">${iv.titulo}</div>
+            <div class="tl-ds">${iv.descripcion}</div>
+            ${iv.proximo_paso ? `<div style="font-size:10px;color:var(--verde);font-weight:500;margin-top:2px">→ ${iv.proximo_paso}</div>` : ''}
+            <div style="font-size:10px;color:var(--txt3);margin-top:2px">${iv.usr?.nombre_completo || '—'}</div>
+          </div>
+        </div>`).join('')
+    : '<div style="font-size:11px;color:var(--txt2);padding:4px 0">Sin intervenciones individuales aún.</div>';
+
+  document.getElementById('modal-hija-prob')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-hija-prob';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.46);z-index:310;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+  modal.innerHTML = `
+    <div style="background:var(--surf);border-radius:var(--rad-lg);width:100%;max-width:500px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.24)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--brd);flex-shrink:0">
+        <div>
+          <div style="font-size:10px;color:var(--azul);font-weight:600;margin-bottom:2px">↑ Parte de problemática grupal</div>
+          <div style="font-size:14px;font-weight:700">${nom}${cur ? ' · ' + cur : ''}</div>
+        </div>
+        <button onclick="document.getElementById('modal-hija-prob').remove()"
+          style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--txt2);padding:0 4px;line-height:1">×</button>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:16px 18px">
+        ${hija.descripcion ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5;padding:8px 10px;background:var(--surf2);border-radius:var(--rad);margin-bottom:12px">${hija.descripcion}</div>` : ''}
+        <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora individual</div>
+        ${invsHTML}
+        ${perm.agregarSeg && !cerrada ? `
+        <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+          <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento individual</div>
+          <textarea id="id-hija-${hijaId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
+          <input type="text" id="ip-hija-${hijaId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
+          <div class="acc" style="margin-top:8px">
+            <button class="btn-p" style="font-size:11px" onclick="guardarSegHija('${hijaId}','${madreId}')">Guardar</button>
+          </div>
+        </div>` : ''}
+        ${perm.cerrar && !cerrada ? `
+        <div style="margin-top:10px;border-top:1px solid var(--brd);padding-top:10px">
+          <button class="btn-d" style="font-size:11px" onclick="cerrarHija('${hijaId}','${madreId}')">Cerrar seguimiento individual</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function guardarSegHija(hijaId, madreId) {
+  const d = document.getElementById('id-hija-' + hijaId)?.value.trim();
+  const p = document.getElementById('ip-hija-' + hijaId)?.value.trim();
+  if (!d) { alert('Describí la acción tomada.'); return; }
+  const { error } = await sb.from('intervenciones').insert({
+    problematica_id: hijaId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Seguimiento',
+    descripcion:     d,
+    proximo_paso:    p || null,
+    tipo:            'otro',
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('problematicas')
+    .update({ estado: 'en_seguimiento', updated_at: new Date().toISOString() })
+    .eq('id', hijaId);
+  document.getElementById('modal-hija-prob')?.remove();
+  await rProb();
+  if (madreId) setTimeout(() => cargarDetProb(madreId), 100);
+}
+
+async function cerrarHija(hijaId, madreId) {
+  const migOk = await detectarMigracion();
+  const payload = migOk
+    ? { estado:'cerrada', cerrado_por:USUARIO_ACTUAL.id, cerrado_at:new Date().toISOString(), updated_at:new Date().toISOString() }
+    : { estado:'cerrada', updated_at:new Date().toISOString() };
+  const { error } = await sb.from('problematicas').update(payload).eq('id', hijaId);
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('intervenciones').insert({
+    problematica_id: hijaId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Caso cerrado',
+    descripcion:     'Seguimiento individual cerrado.',
+    tipo:            'otro',
+  });
+  document.getElementById('modal-hija-prob')?.remove();
+  await rProb();
+  if (madreId) setTimeout(() => cargarDetProb(madreId), 100);
 }
 
 // ─── SEGUIMIENTO ──────────────────────────────────────
@@ -323,9 +491,9 @@ function selChipRow(el, rowId) {
 }
 
 async function confirmarCierreProb(probId) {
-  const el      = document.querySelector(`#motivos-${probId} .chip.on`);
-  const motivo  = el?.textContent || 'Resuelta';
-  const migOk   = await detectarMigracion();
+  const el     = document.querySelector(`#motivos-${probId} .chip.on`);
+  const motivo = el?.textContent || 'Resuelta';
+  const migOk  = await detectarMigracion();
   const updatePayload = migOk
     ? { estado:'cerrada', motivo_cierre:motivo, cerrado_por:USUARIO_ACTUAL.id, cerrado_at:new Date().toISOString(), updated_at:new Date().toISOString() }
     : { estado:'resuelta', updated_at:new Date().toISOString() };
@@ -385,7 +553,15 @@ async function mostrarFormProb() {
       </div>
       <div style="flex:1;overflow-y:auto;padding:16px 18px">
 
-        <div class="sec-lb">Nivel</div>
+        <div class="sec-lb">Modalidad</div>
+        <div class="chip-row" id="pb-modalidad">
+          <div class="chip on" onclick="selChipRow(this,'pb-modalidad');onModalidadProbChange('individual')">Individual</div>
+          <div class="chip" onclick="selChipRow(this,'pb-modalidad');onModalidadProbChange('grupal')">Grupal</div>
+          <div class="chip" onclick="selChipRow(this,'pb-modalidad');onModalidadProbChange('curso')">Curso completo</div>
+        </div>
+        <div id="pb-modalidad-hint" style="font-size:10px;color:var(--txt2);margin-top:4px">Un alumno específico.</div>
+
+        <div class="sec-lb" style="margin-top:10px">Nivel</div>
         <select id="pb-nivel" onchange="onNivelProbChange(this.value)">
           <option value="">— Seleccioná nivel —</option>
           <option value="inicial">Inicial</option>
@@ -399,7 +575,7 @@ async function mostrarFormProb() {
         </select>
 
         <div class="sec-lb" style="margin-top:10px">
-          Alumno/s <span style="font-weight:400;color:var(--txt3)">(podés seleccionar más de uno)</span>
+          Alumno/s <span id="pb-al-hint" style="font-weight:400;color:var(--txt3)">(seleccioná uno)</span>
         </div>
         <div id="pb-al-lista" style="border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf2);min-height:44px;max-height:160px;overflow-y:auto">
           <div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>
@@ -447,6 +623,26 @@ async function mostrarFormProb() {
     </div>`;
   document.body.appendChild(modal);
   window._alumnosSelProb = [];
+}
+
+// ─── FORM HANDLERS ────────────────────────────────────
+function onModalidadProbChange(modalidad) {
+  const mHints  = { individual:'Un alumno específico.', grupal:'Múltiples alumnos del mismo u otros cursos.', curso:'Se cargarán automáticamente todos los alumnos del curso.' };
+  const alHints = { individual:'(seleccioná uno)', grupal:'(podés seleccionar más de uno)', curso:'(se cargan al seleccionar el curso)' };
+  const mHint  = document.getElementById('pb-modalidad-hint');
+  const alHint = document.getElementById('pb-al-hint');
+  if (mHint)  mHint.textContent  = mHints[modalidad]  || '';
+  if (alHint) alHint.textContent = alHints[modalidad] || '';
+
+  window._alumnosSelProb = [];
+  const lista  = document.getElementById('pb-al-lista');
+  const sel    = document.getElementById('pb-al-sel');
+  const nivelEl = document.getElementById('pb-nivel');
+  const cursoEl = document.getElementById('pb-curso');
+  if (lista)   lista.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>';
+  if (sel)     sel.innerHTML   = '';
+  if (nivelEl) nivelEl.value   = '';
+  if (cursoEl) { cursoEl.innerHTML = '<option value="">— Primero seleccioná nivel —</option>'; cursoEl.disabled = true; }
 }
 
 async function onNivelProbChange(nivel) {
@@ -499,6 +695,7 @@ async function onCursoProbChange(cursoId) {
     listaEl.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Sin alumnos en este curso</div>';
     return;
   }
+
   listaEl.innerHTML = data.map(a => {
     const nombre = (a.apellido + ', ' + a.nombre).replace(/'/g, '&apos;');
     return `
@@ -508,6 +705,14 @@ async function onCursoProbChange(cursoId) {
         <span style="font-size:11px">${a.apellido}, ${a.nombre}</span>
       </div>`;
   }).join('');
+
+  const modalidadEl = document.querySelector('#pb-modalidad .chip.on');
+  if (modalidadEl?.textContent?.trim() === 'Curso completo') {
+    data.forEach(a => {
+      const nombre = (a.apellido + ', ' + a.nombre).replace(/'/g, '&apos;');
+      toggleAlumnoSel(a.id, nombre, document.getElementById('al-opt-' + a.id));
+    });
+  }
 }
 
 function toggleAlumnoSel(alumnoId, nombre, rowEl) {
@@ -542,17 +747,21 @@ function selUrgProb(el) {
   el.className = 'urg-b u' + el.dataset.u[0];
 }
 
+// ─── GUARDAR ──────────────────────────────────────────
 async function guardarProb() {
-  const nivel  = document.getElementById('pb-nivel')?.value || null;
-  const desc   = document.getElementById('pb-desc')?.value.trim();
-  const tipoEl = document.querySelector('#pb-tipo .chip.on');
-  const urgEl  = document.querySelector('.urg-b.ua, .urg-b.um, .urg-b.ub');
-  const conf   = document.getElementById('pb-conf')?.classList.contains('on');
-  const respId = document.getElementById('pb-resp')?.value || null;
-  const alumnos = window._alumnosSelProb || [];
+  const nivel       = document.getElementById('pb-nivel')?.value || null;
+  const desc        = document.getElementById('pb-desc')?.value.trim();
+  const tipoEl      = document.querySelector('#pb-tipo .chip.on');
+  const urgEl       = document.querySelector('.urg-b.ua, .urg-b.um, .urg-b.ub');
+  const conf        = document.getElementById('pb-conf')?.classList.contains('on');
+  const respId      = document.getElementById('pb-resp')?.value || null;
+  const alumnos     = window._alumnosSelProb || [];
+  const modalidadEl = document.querySelector('#pb-modalidad .chip.on');
+  const modalidad   = { 'Individual':'individual', 'Grupal':'grupal', 'Curso completo':'curso' }[modalidadEl?.textContent?.trim()] || 'individual';
 
   if (!alumnos.length) { alert('Seleccioná al menos un alumno.'); return; }
   if (!desc)           { alert('Escribí una descripción.'); return; }
+  if (modalidad === 'individual' && alumnos.length > 1) { alert('Para Individual seleccioná solo un alumno.'); return; }
 
   const tipo = TIPOS_VALOR_PROB[tipoEl?.textContent?.trim()] || 'otros';
   const urg  = urgEl?.dataset.u || 'media';
@@ -562,29 +771,65 @@ async function guardarProb() {
 
   const migOk = await detectarMigracion();
 
-  for (const alumno of alumnos) {
-    const basePayload = {
+  if (modalidad === 'individual') {
+    const alumno = alumnos[0];
+    const base   = {
       institucion_id: USUARIO_ACTUAL.institucion_id,
       alumno_id:      alumno.id,
       registrado_por: USUARIO_ACTUAL.id,
-      tipo,
-      urgencia:       urg,
-      descripcion:    desc,
-      confidencial:   conf,
-      estado:         'abierta',
+      tipo, urgencia: urg, descripcion: desc, confidencial: conf,
+      estado: 'abierta', modalidad: 'individual',
     };
-    // Incluir columnas v2 solo si la migración fue aplicada
-    const payload = migOk
-      ? { ...basePayload, responsable_id: respId || null, nivel: nivel || null }
-      : basePayload;
-
+    const payload = migOk ? { ...base, responsable_id: respId || null, nivel: nivel || null } : base;
     const { data: nueva, error } = await sb.from('problematicas').insert(payload).select().single();
     if (error) {
-      alert('Error al guardar: ' + error.message);
+      alert('Error: ' + error.message);
       if (btn) { btn.disabled = false; btn.textContent = 'Registrar y notificar'; }
       return;
     }
     await crearAlertasProb(nueva.id, urg, nivel, alumno.id, respId);
+
+  } else {
+    const base = {
+      institucion_id: USUARIO_ACTUAL.institucion_id,
+      alumno_id:      null,
+      registrado_por: USUARIO_ACTUAL.id,
+      tipo, urgencia: urg, descripcion: desc, confidencial: conf,
+      estado: 'abierta', modalidad,
+    };
+    const madrePayload = migOk ? { ...base, responsable_id: respId || null, nivel: nivel || null } : base;
+    const { data: madre, error: errMadre } = await sb.from('problematicas').insert(madrePayload).select().single();
+    if (errMadre) {
+      alert('Error: ' + errMadre.message);
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar y notificar'; }
+      return;
+    }
+
+    await sb.from('intervenciones').insert({
+      problematica_id: madre.id,
+      registrado_por:  USUARIO_ACTUAL.id,
+      titulo:          'Problemática grupal iniciada',
+      descripcion:     `${alumnos.length} alumno${alumnos.length !== 1 ? 's' : ''} involucrado${alumnos.length !== 1 ? 's' : ''}: ${alumnos.map(a => a.nombre).join(', ')}`,
+      tipo:            'otro',
+    });
+
+    for (const alumno of alumnos) {
+      const hijaBase    = { ...base, alumno_id: alumno.id, modalidad: 'individual', problematica_madre_id: madre.id };
+      const hijaPayload = migOk ? { ...hijaBase, responsable_id: respId || null, nivel: nivel || null } : hijaBase;
+      const { data: hija, error: errHija } = await sb.from('problematicas').insert(hijaPayload).select().single();
+      if (errHija || !hija) continue;
+
+      await sb.from('intervenciones').insert({
+        problematica_id: hija.id,
+        registrado_por:  USUARIO_ACTUAL.id,
+        titulo:          'Originada en problemática grupal',
+        descripcion:     `Registrada como parte de una problemática ${modalidad === 'curso' ? 'de curso completo' : 'grupal'}.`,
+        tipo:            'otro',
+      });
+      await sb.from('problematica_alumnos').insert({ problematica_id: madre.id, alumno_id: alumno.id });
+    }
+
+    await crearAlertasProb(madre.id, urg, nivel, null, respId);
   }
 
   document.getElementById('modal-form-prob')?.remove();
@@ -598,14 +843,12 @@ async function crearAlertasProb(probId, urgencia, nivel, alumnoId, respId) {
   const instId = USUARIO_ACTUAL.institucion_id;
   let dests = [];
 
-  // Obtener curso del alumno para notificar a su preceptor
   let cursoIdAlumno = null;
   if (alumnoId) {
     const { data: al } = await sb.from('alumnos').select('curso_id').eq('id', alumnoId).single();
     cursoIdAlumno = al?.curso_id || null;
   }
 
-  // Director general y directivos de nivel — siempre
   let qDir = sb.from('usuarios').select('id')
     .eq('institucion_id', instId).eq('activo', true)
     .in('rol', ['director_general','directivo_nivel']);
@@ -613,14 +856,12 @@ async function crearAlertasProb(probId, urgencia, nivel, alumnoId, respId) {
   const { data: dirs } = await qDir;
   dests.push(...(dirs || []).map(u => u.id));
 
-  // EOE: urgencia media o alta
   if (urgencia === 'alta' || urgencia === 'media') {
     const { data: eoe } = await sb.from('usuarios').select('id')
       .eq('institucion_id', instId).eq('rol', 'eoe').eq('activo', true);
     dests.push(...(eoe || []).map(u => u.id));
   }
 
-  // Preceptores del curso del alumno
   if (cursoIdAlumno) {
     const { data: precs } = await sb.from('usuarios').select('id')
       .eq('institucion_id', instId).eq('rol', 'preceptor').eq('activo', true)
@@ -628,20 +869,17 @@ async function crearAlertasProb(probId, urgencia, nivel, alumnoId, respId) {
     dests.push(...(precs || []).map(u => u.id));
   }
 
-  // Responsable asignado
   if (respId) dests.push(respId);
 
   dests = [...new Set(dests)].filter(id => id !== USUARIO_ACTUAL.id);
   if (!dests.length) return;
 
-  // Tabla alertas_problematicas (si existe)
   try {
     await sb.from('alertas_problematicas').insert(
       dests.map(uid => ({ problematica_id: probId, usuario_id: uid }))
     );
   } catch(_) {}
 
-  // Notificaciones
   const urgLabel = urgencia === 'alta' ? 'URGENTE' : urgencia === 'media' ? 'Media' : 'Baja';
   await sb.from('notificaciones').insert(
     dests.map(uid => ({
