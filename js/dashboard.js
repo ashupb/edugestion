@@ -722,7 +722,9 @@ async function rDashPreceptor() {
   const pendResp   = (respRes.data    || []).filter(r => r.eventos_institucionales);
   const cursoIdsList = cursos.map(c => c.id);
 
-  // Calcular ayer y si fue día hábil
+  // Calcular hoy/ayer y si son días hábiles
+  const diaHoy = new Date(sem.hoy + 'T12:00:00').getDay();
+  const hoyHabil = diaHoy >= 1 && diaHoy <= 5;
   const ayerDate = new Date(sem.hoy + 'T12:00:00');
   ayerDate.setDate(ayerDate.getDate() - 1);
   const ayer = ayerDate.toISOString().split('T')[0];
@@ -758,7 +760,7 @@ async function rDashPreceptor() {
 
   const cursosConListaHoy  = new Set((asistHoy  || []).map(a => a.curso_id));
   const cursosConListaAyer = new Set((asistAyer || []).map(a => a.curso_id));
-  const pendientesHoy  = cursos.filter(c => !cursosConListaHoy.has(c.id));
+  const pendientesHoy  = hoyHabil ? cursos.filter(c => !cursosConListaHoy.has(c.id)) : [];
   const pendientesAyer = ayerHabil ? cursos.filter(c => !cursosConListaAyer.has(c.id)) : [];
   const todasListas    = pendientesHoy.length === 0 && pendientesAyer.length === 0 && cursos.length > 0;
   const nc             = NIVEL_CONFIG[nivel] || NIVEL_CONFIG.todos;

@@ -1,0 +1,116 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Mantenimiento de este archivo
+
+**Actualizar CLAUDE.md es parte del trabajo.** Cada vez que se realice un cambio significativo — nueva tabla, nuevo módulo, cambio de patrón, migración de base de datos, corrección de bug estructural — actualizar este archivo antes de cerrar la tarea. Lo mismo aplica cuando se compacta el contexto: revisar si la compactación omitió información relevante y reflejarla aquí.
+
+El objetivo es que cualquier instancia nueva de Claude pueda arrancar desde este archivo sin necesidad de explorar el código.
+
+## Proyecto
+
+**Kairu** es un sistema de gestión escolar institucional. Es una SPA (Single Page Application) en Vanilla JavaScript puro — sin framework, sin build system, sin npm. Se sirve abriendo `index.html` directamente en el navegador o via servidor estático.
+
+**Backend**: Supabase (PostgreSQL + Auth + RLS). El cliente global es `sb`, inicializado en `js/config.js`.
+
+## Desarrollo
+
+No hay comandos de build, lint ni tests. Para desarrollar:
+- Abrir `index.html` en el navegador (Live Server de VSCode o similar)
+- Las credenciales de Supabase están en `js/config.js`
+- Los cambios en JS se ven al recargar la página
+
+## Arquitectura
+
+### Flujo de arranque
+1. `window.load` → `verificarSesion()` (auth.js) — chequea sesión Supabase existente
+2. Login exitoso → popula `USUARIO_ACTUAL` y `INSTITUCION_ACTUAL` como globales
+3. `iniciarApp()` (main.js) → `goPage('dash')` → llama al renderer del módulo
+
+### Navegación
+`goPage(id)` en `main.js` es el único punto de navegación. Activa el `<div class="page" id="page-{id}">` correspondiente y llama al renderer:
+
+| id | renderer | archivo |
+|---|---|---|
+| `dash` | `rDash()` | dashboard.js |
+| `prob` | `rProb()` | problematicas.js |
+| `obj` | `rObj()` | modulos.js |
+| `asist` | `rAsist()` | asistencia.js |
+| `notas` | `rNotas()` | calificaciones.js |
+| `leg` | `rLeg()` | legajos.js |
+| `agenda` | `rAgenda()` | agenda.js |
+| `eoe` | `rEOE()` | modulos.js |
+| `admin` | `rAdmin()` (o `rAdmin` de ui.js) | configuracion.js |
+
+### Estado global (main.js)
+- `USUARIO_ACTUAL` — perfil completo del usuario logueado (incluye `id`, `rol`, `institucion_id`, `nivel`, `nombre_completo`)
+- `INSTITUCION_ACTUAL` — datos de la institución
+- `EX` — ID del item actualmente expandido (patrón acordeón). `togEx(key, fn)` lo togglea y llama fn para re-renderizar
+- `CUR_PAGE` — página activa actual
+- `sb` — cliente Supabase (definido en config.js, disponible globalmente)
+
+### Patrón de módulo
+Cada módulo sigue este patrón:
+1. `rXxx()` — función principal: llama `showLoading()`, fetcha datos, renderiza innerHTML del `page-xxx`
+2. Sub-renderers por rol (ej: `rAsistDirector()`, `rAsistDocente()`, `rAsistPreceptor()`)
+3. Cache local en `window._xxxCache` para evitar re-fetches en toggles
+4. El HTML se construye con template literals y se asigna a `innerHTML`
+
+### Roles y permisos
+Los roles son: `director_general`, `directivo_nivel`, `eoe`, `docente`, `preceptor`.
+
+El nav lateral (`nav.js`) y bottom nav mobile (`main.js`) se configuran por rol en `NAV_CONFIG` y `BOTTOM_NAV_ITEMS`. Cada módulo tiene su propia función `xxxPermisos()` que retorna un objeto de booleanos.
+
+Los usuarios `docente` y `preceptor` tienen acceso a asistencia y calificaciones solo para sus cursos asignados. Las asignaciones de docente están en la tabla `asignaciones` (columnas: `docente_id`, `curso_id`, `materia_id`, `anio_lectivo`) — **no** en `docente_cursos`.
+
+## Base de datos — tablas clave
+
+| Tabla | Descripción |
+|---|---|
+| `usuarios` | Perfiles (vinculados a Supabase Auth por `id`) |
+| `instituciones` | Datos institucionales |
+| `cursos` | Cursos con `nivel` (inicial/primario/secundario), `nombre`, `division` |
+| `alumnos` | Alumnos con `curso_id`, `activo` |
+| `materias` | Materias |
+| `asignaciones` | Vínculo docente-curso-materia (`docente_id`, `curso_id`, `materia_id`, `anio_lectivo`) |
+| `asistencia` | Registros diarios (`alumno_id`, `fecha`, `estado`, `hora_clase`) |
+| `problematicas` | Situaciones problemáticas con soporte grupal (`modalidad`, `problematica_madre_id`) |
+| `problematica_alumnos` | Alumnos de una problematica grupal/curso (`problematica_id`, `alumno_id`) |
+| `intervenciones` | Bitácora de seguimiento de problematicas |
+| `notificaciones` | Notificaciones por usuario (`usuario_id`, `tipo`, `referencia_tabla`, `referencia_id`, `leida`) |
+| `eventos_institucionales` | Eventos de agenda con `nivel`, `convocados_ids[]`, `convocatoria_grupos[]` |
+| `config_asistencia` | Configuración de asistencia por nivel e institución |
+| `tipos_justificacion` | Tipos de justificación de ausencia |
+
+### Estados de asistencia
+```
+presente:    valor 0    → cuenta como presente en el %
+tardanza:    valor 0.25 → cuenta como presente en el %
+media_falta: valor 0.5  → cuenta como presente en el %
+justificado: valor 0    → NO cuenta como presente (es ausente con justificación)
+ausente:     valor 1    → NO cuenta como presente
+```
+**Fórmula correcta**: `(presente + tardanza + media_falta) / total * 100`
+
+### Problematicas grupales (v3)
+- `modalidad`: `'individual'` | `'grupal'` | `'curso'`
+- `problematica_madre_id`: FK a la misma tabla (null en madres e individuales)
+- Las madres tienen `alumno_id = null`; las hijas tienen el alumno individual
+- La lista principal filtra con `.is('problematica_madre_id', null)` para mostrar solo madres
+
+## Patrones importantes
+
+### Detección de migración
+Varios módulos usan una función `detectarMigracion()` que cachea si ciertas columnas v2 existen en el schema (para compatibilidad con instancias que no las tienen). Ejemplo en problematicas.js, asistencia.js.
+
+### Notificaciones → navegación
+`abrirNotif()` en `ui.js` navega a la página del módulo y usa `setTimeout` (600–800ms) para abrir el item específico una vez que la lista está renderizada.
+
+### Agenda — filtro por rol
+- `director_general` y `directivo_nivel`: ven todos los eventos de la institución (filtrable por nivel)
+- Otros roles: ven solo eventos de su nivel, o donde están en `convocados_ids[]` o en `convocatoria_grupos[]`
+- Mapping de rol a grupo en `_ROL_A_GRUPO` (agenda.js)
+
+### Carga de scripts
+El orden de `<script>` en `index.html` importa porque todo es global. `config.js` va primero (define `sb`), `main.js` y `auth.js` después, luego los módulos.

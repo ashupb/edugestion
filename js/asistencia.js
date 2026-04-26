@@ -79,10 +79,12 @@ async function rAsistDirector() {
   });
 
   const niveles = nivel ? [nivel] : ['inicial','primario','secundario'];
-  const totalPendiente = cursos.filter(cu => {
+  const diaHoy = new Date(hoy + 'T12:00:00').getDay();
+  const hoyHabil = diaHoy >= 1 && diaHoy <= 5;
+  const totalPendiente = hoyHabil ? cursos.filter(cu => {
     const ids = alumnosPorCurso[cu.id] || [];
     return ids.length > 0 && ids.filter(id => asistSet.has(id)).length < ids.length;
-  }).length;
+  }).length : 0;
 
   const contCardsHTML = totalRegistradosHoy > 0 ? `
     <div class="metrics" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin-bottom:14px">
@@ -342,8 +344,10 @@ async function rAsistPreceptor() {
     return;
   }
 
-  // Verificar listas de ayer (si era día hábil — lunes a viernes)
-  const diaAyer = new Date(ayer).getDay(); // 0=dom, 6=sab
+  // Verificar si hoy y ayer son días hábiles (lunes a viernes)
+  const diaHoy  = new Date(hoy + 'T12:00:00').getDay();
+  const hoyHabil = diaHoy >= 1 && diaHoy <= 5;
+  const diaAyer = new Date(ayer + 'T12:00:00').getDay(); // 0=dom, 6=sab
   const ayerHabil = diaAyer >= 1 && diaAyer <= 5;
 
   let bloqueoAyer = false;
@@ -363,8 +367,8 @@ async function rAsistPreceptor() {
     .select('curso_id').eq('fecha', hoy).is('hora_clase', null)
     .in('curso_id', cursos.map(c => c.id));
   const cursosConLista = new Set((asistHoy||[]).map(a => a.curso_id));
-  const pendientesHoy  = cursos.filter(cu => !cursosConLista.has(cu.id));
-  const todasHoy       = pendientesHoy.length === 0;
+  const pendientesHoy  = hoyHabil ? cursos.filter(cu => !cursosConLista.has(cu.id)) : [];
+  const todasHoy       = !hoyHabil || pendientesHoy.length === 0;
 
   // Resumen del día
   const resumenHTML = await buildResumenDia(instId, hoy);

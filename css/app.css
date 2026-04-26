@@ -284,7 +284,9 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  min-height: 100vh;
+  height: 100vh;
+  position: sticky;
+  top: 0;
   transition: width .2s;
 }
 .sidebar.collapsed { width: 56px; }

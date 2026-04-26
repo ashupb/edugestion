@@ -292,7 +292,7 @@ async function cargarDetProb(probId) {
     ? intvs.map(iv => `
         <div class="tl-it">
           <div class="tl-d" style="background:${dotColor(iv.titulo)}"></div>
-          <div class="tl-f">${formatFechaCorta(iv.created_at)}</div>
+          <div class="tl-f">${formatFechaCorta(iv.created_at?.split('T')[0])}</div>
           <div style="flex:1;min-width:0">
             <div class="tl-t">${iv.titulo}</div>
             <div class="tl-ds">${iv.descripcion}</div>
@@ -359,7 +359,7 @@ async function abrirDetalleHija(hijaId) {
     ? intvs.map(iv => `
         <div class="tl-it">
           <div class="tl-d" style="background:${dotColor(iv.titulo)}"></div>
-          <div class="tl-f">${formatFechaCorta(iv.created_at)}</div>
+          <div class="tl-f">${formatFechaCorta(iv.created_at?.split('T')[0])}</div>
           <div style="flex:1;min-width:0">
             <div class="tl-t">${iv.titulo}</div>
             <div class="tl-ds">${iv.descripcion}</div>
@@ -610,7 +610,7 @@ async function mostrarFormProb() {
             <div style="font-size:12px;font-weight:500">Confidencial</div>
             <div style="font-size:10px;color:var(--txt2)">Solo visible para EOE y directivos</div>
           </div>
-          <div class="tog on" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')">
+          <div class="tog" id="pb-conf" onclick="this.classList.toggle('on');this.classList.toggle('off')">
             <div class="tog-thumb"></div>
           </div>
         </div>
