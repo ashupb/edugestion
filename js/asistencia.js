@@ -174,7 +174,7 @@ async function verCursoDirector(cursoId, nivel) {
   alumnos.forEach(al => totalPorAlumno[al.id] = 0);
   asists.forEach(a => {
     const val = ESTADOS_ASIST[a.estado]?.valor || 0;
-    if (a.estado !== 'justificado' || config.justificada_cuenta) {
+    if (a.estado !== 'justificado' || config.justificadas_cuentan) {
       totalPorAlumno[a.alumno_id] = (totalPorAlumno[a.alumno_id] || 0) + val;
     }
   });
@@ -187,7 +187,7 @@ async function verCursoDirector(cursoId, nivel) {
   const pctPres  = alumnos.length ? Math.round(presHoy/alumnos.length*100) : 0;
 
   // Alumnos en riesgo
-  const enRiesgo = alumnos.filter(al => totalPorAlumno[al.id] >= (config.umbral_alerta_2 || 10));
+  const enRiesgo = alumnos.filter(al => totalPorAlumno[al.id] >= (config.umbral_alerta_2 ?? 20));
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -235,7 +235,7 @@ async function verCursoDirector(cursoId, nivel) {
     <div class="card" style="padding:0">
       ${alumnos.map(al => {
         const faltas = totalPorAlumno[al.id] || 0;
-        const color  = faltas >= (config.umbral_alerta_2||10) ? 'var(--rojo)' : faltas >= (config.umbral_alerta_1||5) ? 'var(--ambar)' : 'var(--verde)';
+        const color  = faltas >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : faltas >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
         const pct    = config.umbral_regularidad ? Math.min(Math.round(faltas/config.umbral_regularidad*100),100) : 0;
         return `
           <div class="asist-alumno-row" onclick="verAlumnoAsist('${al.id}')">
@@ -500,7 +500,7 @@ async function mostrarGrillaPreceptor(cursoId, nivel, nombreCurso) {
               total += st?.valor || 0;
               return `<td><span class="grilla-cell" style="background:${st?.bg};color:${st?.color}">${st?.short}</span></td>`;
             }).join('');
-            const colorT = total >= (config.umbral_alerta_2||10) ? 'var(--rojo)' : total >= (config.umbral_alerta_1||5) ? 'var(--ambar)' : 'var(--verde)';
+            const colorT = total >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : total >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
             return `<tr>
               <td style="font-size:11px;font-weight:500;cursor:pointer" onclick="verAlumnoAsist('${al.id}')">
                 ${al.apellido}, ${al.nombre}
@@ -700,7 +700,7 @@ async function mostrarGrillaDocente(cursoId, nivel, materiaId, titulo) {
               total += st?.valor || 0;
               return `<td><span class="grilla-cell" style="background:${st?.bg};color:${st?.color}">${st?.short}</span></td>`;
             }).join('');
-            const colorT = total >= (config.umbral_alerta_2||10) ? 'var(--rojo)' : total >= (config.umbral_alerta_1||5) ? 'var(--ambar)' : 'var(--verde)';
+            const colorT = total >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : total >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
             return `<tr>
               <td style="font-size:11px;font-weight:500">${al.apellido}, ${al.nombre}</td>
               ${celdas}
@@ -960,13 +960,13 @@ async function verAlumnoAsist(alumnoId) {
   const conteo = {};
   asists.forEach(a => {
     conteo[a.estado] = (conteo[a.estado]||0) + 1;
-    if (a.estado !== 'justificado' || config.justificada_cuenta) {
+    if (a.estado !== 'justificado' || config.justificadas_cuentan) {
       totalFaltas += ESTADOS_ASIST[a.estado]?.valor || 0;
     }
   });
 
   const pct   = config.umbral_regularidad ? Math.min(Math.round(totalFaltas/config.umbral_regularidad*100),100) : 0;
-  const color = totalFaltas >= (config.umbral_alerta_2||10) ? 'var(--rojo)' : totalFaltas >= (config.umbral_alerta_1||5) ? 'var(--ambar)' : 'var(--verde)';
+  const color = totalFaltas >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : totalFaltas >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -1033,7 +1033,7 @@ async function verificarAlertas(alumnoIds, instId, nivel) {
 
     let totalFaltas = 0;
     (registros||[]).forEach(r => {
-      if (r.estado === 'justificado' && !config.justificada_cuenta) return;
+      if (r.estado === 'justificado' && !config.justificadas_cuentan) return;
       totalFaltas += ESTADOS_ASIST[r.estado]?.valor || 0;
     });
 

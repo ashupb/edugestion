@@ -4,16 +4,58 @@
 
 let TIPOS_EVAL   = [];
 let PERIODOS     = [];
+let CONFIG_NOTAS = {}; // keyed por nivel, poblado en rNotas()
 
-const NOTA_COLOR = (n) => n >= 7 ? 'var(--verde)' : n >= 5 ? 'var(--ambar)' : 'var(--rojo)';
-const NOTA_BG    = (n) => n >= 7 ? 'var(--verde-l)' : n >= 5 ? 'var(--amb-l)' : 'var(--rojo-l)';
-const NOTA_CLS   = (n) => n >= 7 ? 'nota-ok' : n >= 5 ? 'nota-warn' : 'nota-risk';
+// ─── HELPERS DE ESCALA POR NIVEL/CICLO ───────────────
+// Detecta primer ciclo primario (1°, 2°, 3°) a partir del nombre del curso
+function _esPrimerCiclo(nombreCurso) {
+  const n = parseInt(nombreCurso);
+  return !isNaN(n) && n >= 1 && n <= 3;
+}
+
+// Umbral de aprobación según nivel y curso (null = escala conceptual, sin umbral numérico)
+function _umbralMin(nivel, nombreCurso) {
+  if (nivel === 'inicial') return null;
+  if (nivel === 'primario' && _esPrimerCiclo(nombreCurso)) return null;
+  return (CONFIG_NOTAS[nivel]?.nota_minima) ?? 7;
+}
+
+// Umbral de recuperación (zona ambar): debajo de este → rojo
+function _umbralRec(nivel, nombreCurso) {
+  if (nivel === 'inicial') return null;
+  if (nivel === 'primario' && _esPrimerCiclo(nombreCurso)) return null;
+  return (CONFIG_NOTAS[nivel]?.nota_recuperacion) ?? 4;
+}
+
+// NOTA_COLOR / NOTA_BG / NOTA_CLS aceptan (nota) o (nota, nivel, nombreCurso)
+// Retrocompatibles: sin nivel/nombreCurso usan umbrales por defecto
+const NOTA_COLOR = (n, nivel, nombreCurso) => {
+  if (n === null || n === undefined) return 'var(--txt3)';
+  const min = nivel ? _umbralMin(nivel, nombreCurso) : 7;
+  const rec = nivel ? _umbralRec(nivel, nombreCurso) : 4;
+  if (min === null) return 'var(--txt2)'; // conceptual: sin color especial
+  return n >= min ? 'var(--verde)' : n >= rec ? 'var(--ambar)' : 'var(--rojo)';
+};
+const NOTA_BG = (n, nivel, nombreCurso) => {
+  if (n === null || n === undefined) return 'var(--surf2)';
+  const min = nivel ? _umbralMin(nivel, nombreCurso) : 7;
+  const rec = nivel ? _umbralRec(nivel, nombreCurso) : 4;
+  if (min === null) return 'var(--surf2)';
+  return n >= min ? 'var(--verde-l)' : n >= rec ? 'var(--amb-l)' : 'var(--rojo-l)';
+};
+const NOTA_CLS = (n, nivel, nombreCurso) => {
+  if (n === null || n === undefined) return 'nota-nd';
+  const min = nivel ? _umbralMin(nivel, nombreCurso) : 7;
+  const rec = nivel ? _umbralRec(nivel, nombreCurso) : 4;
+  if (min === null) return 'nota-nd';
+  return n >= min ? 'nota-ok' : n >= rec ? 'nota-warn' : 'nota-risk';
+};
 
 // ─── HELPERS GLOBALES ─────────────────────────────────
-function renderSituacionCard(alumnos, getPromedio, prefijo, titulo) {
-  const criticos    = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p < 4; });
-  const observacion = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= 4 && p < 7; });
-  const aprobados   = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= 7; });
+function renderSituacionCard(alumnos, getPromedio, prefijo, titulo, notaMin = 7, notaRec = 4) {
+  const criticos    = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p < notaRec; });
+  const observacion = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= notaRec && p < notaMin; });
+  const aprobados   = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= notaMin; });
   const sinNotas    = alumnos.filter(al => getPromedio(al) === null);
 
   const listaHTML = (lista, color) => lista.map(al => `
@@ -34,17 +76,17 @@ function renderSituacionCard(alumnos, getPromedio, prefijo, titulo) {
         <div class="mc" style="background:var(--rojo-l);cursor:pointer;border:1.5px solid transparent"
           onclick="toggleSit('${prefijo}crit')" title="Ver alumnos críticos">
           <div class="mc-v" style="color:var(--rojo);font-size:20px">${criticos.length}</div>
-          <div class="mc-l">Críticos (&lt;4)</div>
+          <div class="mc-l">Críticos (&lt;${notaRec})</div>
         </div>
         <div class="mc" style="background:var(--amb-l);cursor:pointer;border:1.5px solid transparent"
           onclick="toggleSit('${prefijo}obs')" title="Ver alumnos en observación">
           <div class="mc-v" style="color:var(--ambar);font-size:20px">${observacion.length}</div>
-          <div class="mc-l">Observación (4–6)</div>
+          <div class="mc-l">Observación (${notaRec}–${notaMin - 1})</div>
         </div>
         <div class="mc" style="background:var(--verde-l);cursor:pointer;border:1.5px solid transparent"
           onclick="toggleSit('${prefijo}apr')" title="Ver aprobados">
           <div class="mc-v" style="color:var(--verde);font-size:20px">${aprobados.length}</div>
-          <div class="mc-l">Aprobados (7+)</div>
+          <div class="mc-l">Aprobados (${notaMin}+)</div>
         </div>
       </div>
       ${criticos.length ? `
@@ -89,12 +131,15 @@ async function rNotas() {
   const instId = USUARIO_ACTUAL.institucion_id;
   const rol    = USUARIO_ACTUAL.rol;
 
-  const [tiposRes, periodosRes] = await Promise.all([
+  const [tiposRes, periodosRes, cfgNotasRes] = await Promise.all([
     sb.from('tipos_evaluacion').select('*').eq('institucion_id', instId).eq('activo', true).order('nombre'),
     sb.from('periodos_evaluativos').select('*').eq('institucion_id', instId).eq('anio', 2026).order('nivel').order('numero'),
+    sb.from('config_asistencia').select('*').eq('institucion_id', instId),
   ]);
-  TIPOS_EVAL = tiposRes.data  || [];
-  PERIODOS   = periodosRes.data || [];
+  TIPOS_EVAL   = tiposRes.data  || [];
+  PERIODOS     = periodosRes.data || [];
+  CONFIG_NOTAS = {};
+  (cfgNotasRes.data || []).forEach(c => CONFIG_NOTAS[c.nivel] = c);
 
   if (rol === 'docente')                                              await rNotasDocente();
   else if (rol === 'director_general' || rol === 'directivo_nivel')  await rNotasDirectivo();
@@ -306,7 +351,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
         </div>
 
       <!-- Situación académica -->
-      ${renderSituacionCard(alumnos, al => promedios[al.id], `doc-${PERIODO_SEL.slice(-4)}-`, 'Situación en esta materia')}
+      ${renderSituacionCard(alumnos, al => promedios[al.id], `doc-${PERIODO_SEL.slice(-4)}-`, 'Situación en esta materia', _umbralMin(nivel, nombreCurso) ?? 7, _umbralRec(nivel, nombreCurso) ?? 4)}
 
       <!-- Botones acción -->
       ${(() => {
@@ -385,7 +430,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
                       const nota = calif.nota;
                       return `
                         <td>
-                          <span class="nota-cell ${NOTA_CLS(nota)}" style="cursor:pointer"
+                          <span class="nota-cell ${NOTA_CLS(nota, nivel, nombreCurso)}" style="cursor:pointer"
                             onclick="abrirModalNota('${al.id}','${inst.id}','${cursoId}','${materiaId}','${PERIODO_SEL}',${nota})">
                             ${nota % 1 === 0 ? nota : nota.toFixed(1)}
                           </span>
@@ -393,7 +438,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
                     }).join('')}
                     <td>
                       ${prom !== null
-                        ? `<span style="font-weight:700;color:${NOTA_COLOR(prom)}">${prom.toFixed(1)}</span>`
+                        ? `<span style="font-weight:700;color:${NOTA_COLOR(prom, nivel, nombreCurso)}">${prom.toFixed(1)}</span>`
                         : `<span style="color:var(--txt3)">—</span>`}
                     </td>
                   </tr>`;
@@ -1080,7 +1125,7 @@ async function verCalifCurso(cursoId, nivel) {
     const getProm = al => promedioGlobal[al.id] ?? null;
 
     return `
-      ${renderSituacionCard(alumnos, getProm, `dir-${cursoId.slice(-4)}-${PERIODO_SEL.slice(-4)}-`, 'Situación del curso')}
+      ${renderSituacionCard(alumnos, getProm, `dir-${cursoId.slice(-4)}-${PERIODO_SEL.slice(-4)}-`, 'Situación del curso', _umbralMin(nivel, curso?.nombre) ?? 7, _umbralRec(nivel, curso?.nombre) ?? 4)}
         <div class="periodo-tabs" style="align-items:center">
             ${periodosCurso.map(p => {
               const esSel = PERIODO_SEL === p.id;

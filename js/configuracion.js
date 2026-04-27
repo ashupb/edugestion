@@ -289,7 +289,7 @@ async function _guardarInstitucion() {
   if (pgSub)  pgSub.textContent  = nombre;
   document.title = nombre + ' · Kairu';
 
-  alert('Cambios guardados correctamente.');
+  _toastOk('Cambios guardados correctamente');
 }
 
 // ══════════════════════════════════════════════════════
@@ -1551,8 +1551,23 @@ async function _guardarAsignaciones() {
 let _paramSubTab = 'inicial';
 
 async function _renderParametros() {
-  const sec     = document.getElementById('adm-section-content');
-  const niveles = USUARIO_ACTUAL.rol === 'directivo_nivel' ? [USUARIO_ACTUAL.nivel] : ['inicial', 'primario', 'secundario'];
+  const sec  = document.getElementById('adm-section-content');
+  const inst = INSTITUCION_ACTUAL || {};
+
+  // Solo niveles que la institución tiene activos
+  const nivelesActivos = ['inicial', 'primario', 'secundario'].filter(n => inst['nivel_' + n]);
+  // Si ninguno está configurado todavía (institución sin setup), mostrar todos
+  const nivelesBase = nivelesActivos.length ? nivelesActivos : ['inicial', 'primario', 'secundario'];
+
+  const niveles = USUARIO_ACTUAL.rol === 'directivo_nivel'
+    ? [USUARIO_ACTUAL.nivel].filter(n => nivelesBase.includes(n))
+    : nivelesBase;
+
+  if (!niveles.length) {
+    sec.innerHTML = '<div class="empty-state">No hay niveles activos. Activá al menos un nivel en la pestaña Institución.</div>';
+    return;
+  }
+
   if (!niveles.includes(_paramSubTab)) _paramSubTab = niveles[0];
 
   sec.innerHTML = `
@@ -1571,7 +1586,10 @@ async function _renderParametros() {
 
 async function _paramTab(nivel) {
   _paramSubTab = nivel;
-  ['inicial', 'primario', 'secundario'].forEach(n => {
+  const inst = INSTITUCION_ACTUAL || {};
+  const nivelesActivos = ['inicial', 'primario', 'secundario'].filter(n => inst['nivel_' + n]);
+  const nivelesBase = nivelesActivos.length ? nivelesActivos : ['inicial', 'primario', 'secundario'];
+  nivelesBase.forEach(n => {
     const chip = document.getElementById('param-chip-' + n);
     if (!chip) return;
     const activo = n === nivel;
@@ -1646,6 +1664,14 @@ async function _renderParamNivel(nivel) {
             ${VALS_CONC.map(v => `<option value="${v}" ${aprob1 === v ? 'selected' : ''}>${v}</option>`).join('')}
           </select>
         </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt2);margin-bottom:6px;padding:8px 10px;background:var(--surf2);border-radius:var(--rad)">
+        <strong style="color:var(--txt)">Referencia de escala:</strong>&nbsp;
+        <span><b>D</b> = En inicio</span>&nbsp;·&nbsp;
+        <span><b>R</b> = En proceso</span>&nbsp;·&nbsp;
+        <span><b>B</b> = Bueno</span>&nbsp;·&nbsp;
+        <span><b>MB</b> = Muy bueno</span>&nbsp;·&nbsp;
+        <span><b>S</b> = Sobresaliente</span>
       </div>
       <div style="font-size:11px;color:var(--txt2);margin-bottom:14px;padding:6px 10px;background:var(--surf2);border-radius:var(--rad)">
         Evaluación cuatrimestral · Promoción automática en 1° y 2°
@@ -1765,10 +1791,18 @@ async function _renderParamNivel(nivel) {
       <div id="lista-periodos">
         ${periodos.length ? periodos.map(p => `
           <div style="background:var(--surf2);border:1px solid var(--brd);border-radius:var(--rad);padding:12px 14px;margin-bottom:8px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div style="font-size:13px;font-weight:600">${_esc(p.nombre)}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">
+              <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+                <div id="pnombre-text-${p.id}" style="font-size:13px;font-weight:600">${_esc(p.nombre)}</div>
+                <input id="pnombre-inp-${p.id}" type="text" value="${_esc(p.nombre)}"
+                  style="display:none;font-size:13px;font-weight:600;padding:2px 6px;border:1px solid var(--brd);border-radius:5px;background:var(--bg);color:var(--txt);max-width:200px">
+                <button id="pnombre-btn-${p.id}" onclick="_editarNombrePeriodo('${p.id}')"
+                  style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--txt3);padding:0 3px;line-height:1;flex-shrink:0" title="Editar nombre">✎</button>
+                <button id="pnombre-save-${p.id}" onclick="_guardarNombrePeriodo('${p.id}','${nivel}')"
+                  style="display:none;background:none;border:none;cursor:pointer;font-size:12px;color:var(--verde);padding:0 4px;font-weight:700;flex-shrink:0" title="Guardar nombre">✓</button>
+              </div>
               <button onclick="_eliminarPeriodo('${p.id}','${nivel}')"
-                style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--txt3);padding:0 2px;line-height:1" title="Eliminar">×</button>
+                style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--txt3);padding:0 2px;line-height:1;flex-shrink:0" title="Eliminar">×</button>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div>
@@ -1860,6 +1894,7 @@ async function _guardarConfigAsistencia(nivel, existingId) {
       if (error) throw error;
     }
     await _renderParamNivel(nivel);
+    _toastOk('Configuración guardada');
   } catch (e) {
     alert('Error al guardar: ' + e.message);
   }
@@ -1909,6 +1944,23 @@ async function _agregarPeriodo(nivel) {
   }]);
   if (error) { alert('Error: ' + error.message); return; }
   if (inp) inp.value = '';
+  await _renderParamNivel(nivel);
+}
+
+function _editarNombrePeriodo(id) {
+  document.getElementById('pnombre-text-' + id).style.display = 'none';
+  document.getElementById('pnombre-inp-'  + id).style.display = '';
+  document.getElementById('pnombre-btn-'  + id).style.display = 'none';
+  document.getElementById('pnombre-save-' + id).style.display = '';
+  document.getElementById('pnombre-inp-'  + id).focus();
+}
+
+async function _guardarNombrePeriodo(id, nivel) {
+  const nombre = document.getElementById('pnombre-inp-' + id)?.value?.trim();
+  if (!nombre) return;
+  const { error } = await sb.from('periodos_evaluativos').update({ nombre }).eq('id', id);
+  if (error) { alert('Error: ' + error.message); return; }
+  _toastOk('Período actualizado');
   await _renderParamNivel(nivel);
 }
 
@@ -2139,6 +2191,42 @@ function inyectarEstilosAdmin() {
       .adm-modal-overlay { align-items: flex-end; padding: 0; }
       .adm-modal         { max-width: none; max-height: 92vh; border-radius: var(--rad-lg) var(--rad-lg) 0 0; }
     }
+
+    /* ── Toast de confirmación ── */
+    .adm-toast-ok {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(14px);
+      background: var(--verde);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 22px;
+      border-radius: 24px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.2);
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .adm-toast-ok.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   `;
   document.head.appendChild(s);
+}
+
+function _toastOk(msg) {
+  const t = document.createElement('div');
+  t.className = 'adm-toast-ok';
+  t.textContent = msg || 'Guardado correctamente';
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 300);
+  }, 2500);
 }
