@@ -31,7 +31,7 @@ async function iniciarApp() {
   const iniciales = u.avatar_iniciales || generarIniciales(u.nombre_completo);
   document.getElementById('sb-av').textContent    = iniciales.toUpperCase();
   document.getElementById('sb-nombre').textContent = u.nombre_completo;
-  document.getElementById('sb-rol').textContent    = labelRol(u.rol);
+  document.getElementById('sb-rol').textContent    = labelRol(u.rol_display || u.rol);
 
   // Nombre de la institución en sidebar — genérico, se carga de la BD
   const instNombre = INSTITUCION_ACTUAL?.nombre || 'Kairu';
@@ -136,6 +136,8 @@ function labelRol(rol) {
   return {
     director_general: 'Dirección general',
     directivo_nivel:  'Directivo/a',
+    secretario:       'Secretario/a',
+    vicedirector:     'Vicedirector/a',
     eoe:              'Orientador/a EOE',
     docente:          'Docente',
     preceptor:        'Preceptor/a',

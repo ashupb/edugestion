@@ -80,6 +80,10 @@ async function login() {
     // 4. Guardar estado global
     USUARIO_ACTUAL     = { ...data.user, ...perfil };
     INSTITUCION_ACTUAL = instData;
+    if (['secretario','vicedirector'].includes(USUARIO_ACTUAL.rol)) {
+      USUARIO_ACTUAL.rol_display = USUARIO_ACTUAL.rol;
+      USUARIO_ACTUAL.rol = 'directivo_nivel';
+    }
 
     // Si aún no tiene institución asignada → pantalla de configuración inicial
     if (!USUARIO_ACTUAL.institucion_id) {
@@ -135,6 +139,10 @@ async function verificarSesion() {
   if (perfil && perfil.activo) {
     USUARIO_ACTUAL     = { ...session.user, ...perfil };
     INSTITUCION_ACTUAL = instData;
+    if (['secretario','vicedirector'].includes(USUARIO_ACTUAL.rol)) {
+      USUARIO_ACTUAL.rol_display = USUARIO_ACTUAL.rol;
+      USUARIO_ACTUAL.rol = 'directivo_nivel';
+    }
 
     // Si aún no tiene institución asignada → pantalla de configuración inicial
     if (!USUARIO_ACTUAL.institucion_id) {

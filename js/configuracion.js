@@ -32,6 +32,8 @@ const NIVEL_LABELS_ADM = {
 const ROL_LABELS_ADM = {
   director_general: 'Director General',
   directivo_nivel:  'Directivo de Nivel',
+  secretario:       'Secretario/a',
+  vicedirector:     'Vicedirector/a',
   docente:          'Docente',
   preceptor:        'Preceptor',
   eoe:              'EOE',
@@ -40,6 +42,8 @@ const ROL_LABELS_ADM = {
 const ROL_BADGE_ADM = {
   director_general: 'tg',
   directivo_nivel:  'tp',
+  secretario:       'tp',
+  vicedirector:     'tp',
   docente:          'td',
   preceptor:        'ta',
   eoe:              'tr',
@@ -255,8 +259,8 @@ async function _agregarOrientacion() {
 }
 
 async function _eliminarOrientacion(id) {
-  if (!confirm('¿Desactivar esta orientación?')) return;
-  const { error } = await sb.from('orientaciones').update({ activo: false }).eq('id', id);
+  if (!confirm('¿Eliminar esta orientación? Esta acción no se puede deshacer.')) return;
+  const { error } = await sb.from('orientaciones').delete().eq('id', id);
   if (error) { alert('Error: ' + error.message); return; }
   const { data } = await sb.from('orientaciones').select('*').eq('activo', true).order('nombre');
   const lista = document.getElementById('lista-orientaciones');
@@ -397,7 +401,7 @@ async function _abrirModalUsuario(userId) {
   const cursosTodos = cursosAll || [];
 
   const rolesDisp = USUARIO_ACTUAL.rol === 'director_general'
-    ? ['director_general', 'directivo_nivel', 'docente', 'preceptor', 'eoe']
+    ? ['director_general', 'directivo_nivel', 'secretario', 'vicedirector', 'docente', 'preceptor', 'eoe']
     : ['docente', 'preceptor', 'eoe'];
 
   const nivelesDisp = USUARIO_ACTUAL.rol === 'directivo_nivel'
@@ -409,7 +413,7 @@ async function _abrirModalUsuario(userId) {
   const cursosSel = user?.cursos_ids || [];
   const cursosFilt = nivelSel ? cursosTodos.filter(c => c.nivel === nivelSel) : [];
 
-  const mostrarNivel   = ['directivo_nivel', 'preceptor', 'docente'].includes(rolSel);
+  const mostrarNivel   = ['directivo_nivel', 'secretario', 'vicedirector', 'preceptor', 'docente'].includes(rolSel);
   const mostrarCursos  = rolSel === 'preceptor' && cursosFilt.length > 0;
 
   const cursosTodosJSON = JSON.stringify(cursosTodos).replace(/"/g, '&quot;');
@@ -551,7 +555,7 @@ function _muOnRolChange(nivelesJSON, cursosTodosJSON) {
   const nivelRow     = document.getElementById('mu-nivel-row');
   const cursosRow    = document.getElementById('mu-cursos-row');
 
-  if (nivelRow)  nivelRow.style.display  = ['directivo_nivel', 'preceptor', 'docente'].includes(rol) ? '' : 'none';
+  if (nivelRow)  nivelRow.style.display  = ['directivo_nivel', 'secretario', 'vicedirector', 'preceptor', 'docente'].includes(rol) ? '' : 'none';
   if (cursosRow) cursosRow.style.display = 'none';
 
   if (rol === 'preceptor') _muOnNivelChange(JSON.stringify(cursosTodos).replace(/"/g, '&quot;'));
@@ -1275,11 +1279,9 @@ async function _renderMaterias() {
       <div class="sec-lb" style="color:${color}">${NIVEL_LABELS_ADM[nivel] || nivel}</div>
       ${lista.map(m => `
         <div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:6px">
-          <div style="flex:1;font-size:12px;font-weight:500;${m.activo === false ? 'color:var(--txt3);text-decoration:line-through' : ''}">${_esc(m.nombre)}</div>
+          <div style="flex:1;font-size:12px;font-weight:500">${_esc(m.nombre)}</div>
           <button class="btn-s" onclick="_abrirModalMateria('${m.id}')">Editar</button>
-          ${m.activo !== false
-            ? `<button class="btn-d" onclick="_desactivarMateria('${m.id}')">Desactivar</button>`
-            : `<span class="tag tr">Inactivo</span>`}
+          <button class="btn-d" onclick="_desactivarMateria('${m.id}')">Eliminar</button>
         </div>`).join('')}`;
   }).join('');
 
@@ -1329,8 +1331,8 @@ async function _abrirModalMateria(materiaId) {
 }
 
 async function _desactivarMateria(materiaId) {
-  if (!confirm('¿Desactivar esta materia?')) return;
-  const { error } = await sb.from('materias').update({ activo: false }).eq('id', materiaId);
+  if (!confirm('¿Eliminar esta materia? Esta acción no se puede deshacer.')) return;
+  const { error } = await sb.from('materias').delete().eq('id', materiaId);
   if (error) { alert('Error: ' + error.message); return; }
   await _renderMaterias();
 }
@@ -1705,9 +1707,11 @@ async function _renderParametros() {
           ${NIVEL_LABELS_ADM[n]}
         </div>`).join('')}
     </div>
-    <div id="param-content"></div>`;
+    <div id="param-content"></div>
+    <div id="param-global"></div>`;
 
   await _renderParamNivel(_paramSubTab);
+  await _renderParamGlobal();
 }
 
 async function _paramTab(nivel) {
@@ -1735,20 +1739,14 @@ async function _renderParamNivel(nivel) {
   const instId = USUARIO_ACTUAL.institucion_id;
   const color  = NIVEL_COLORS_ADM[nivel];
 
-  const [cfgRes, tiposEvalRes, tiposJustRes, tiposEventoRes, periodosRes] = await Promise.all([
+  const [cfgRes, periodosRes] = await Promise.all([
     sb.from('config_asistencia').select('*').eq('institucion_id', instId).eq('nivel', nivel).maybeSingle(),
-    sb.from('tipos_evaluacion').select('*').eq('institucion_id', instId).or(`nivel.eq.${nivel},nivel.is.null`).order('nombre'),
-    sb.from('tipos_justificacion').select('*').eq('institucion_id', instId).eq('nivel', nivel).order('nombre'),
-    sb.from('tipos_evento').select('*').eq('institucion_id', instId).order('nombre'),
     sb.from('periodos_evaluativos').select('*').eq('institucion_id', instId).eq('nivel', nivel).order('fecha_inicio'),
   ]);
 
-  const cfg         = cfgRes.data       || {};
-  const tiposEval   = tiposEvalRes.data  || [];
-  const tiposJust   = tiposJustRes.data  || [];
-  const tiposEvento = tiposEventoRes.data || [];
-  const periodos    = periodosRes.data   || [];
-  const cfgId       = cfg.id || '';
+  const cfg     = cfgRes.data     || {};
+  const periodos = periodosRes.data || [];
+  const cfgId   = cfg.id || '';
 
   // ── Sección evaluación diferenciada por nivel ───────
   let htmlEvaluacion = '';
@@ -1868,42 +1866,6 @@ async function _renderParamNivel(nivel) {
       </div>
     </div>
 
-    <!-- TIPOS EVALUACIÓN -->
-    <div class="card">
-      <div class="card-t">Tipos de evaluación</div>
-      <div id="lista-tipos-eval">
-        ${_renderListaTipos(tiposEval, 'tipos_evaluacion', nivel, 'lista-tipos-eval')}
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="new-tipo-eval-${nivel}" placeholder="Nuevo tipo de evaluación" style="flex:1">
-        <button class="btn-s" onclick="_agregarTipo('tipos_evaluacion','new-tipo-eval-${nivel}','${nivel}','lista-tipos-eval')">Agregar</button>
-      </div>
-    </div>
-
-    <!-- TIPOS JUSTIFICACIÓN -->
-    <div class="card">
-      <div class="card-t">Tipos de justificación de asistencia</div>
-      <div id="lista-tipos-just">
-        ${_renderListaTipos(tiposJust, 'tipos_justificacion', nivel, 'lista-tipos-just')}
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="new-tipo-just-${nivel}" placeholder="Nuevo tipo de justificación" style="flex:1">
-        <button class="btn-s" onclick="_agregarTipo('tipos_justificacion','new-tipo-just-${nivel}','${nivel}','lista-tipos-just')">Agregar</button>
-      </div>
-    </div>
-
-    <!-- TIPOS EVENTO -->
-    <div class="card">
-      <div class="card-t">Tipos de eventos de agenda</div>
-      <div id="lista-tipos-evento">
-        ${_renderListaTipos(tiposEvento, 'tipos_evento', nivel, 'lista-tipos-evento')}
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <input type="text" id="new-tipo-evento-${nivel}" placeholder="Nuevo tipo de evento" style="flex:1">
-        <button class="btn-s" onclick="_agregarTipo('tipos_evento','new-tipo-evento-${nivel}','${nivel}','lista-tipos-evento')">Agregar</button>
-      </div>
-    </div>
-
     <!-- PERÍODOS EVALUATIVOS -->
     <div class="card">
       <div class="card-t">Períodos evaluativos</div>
@@ -1944,6 +1906,61 @@ async function _renderParamNivel(nivel) {
     </div>`;
 }
 
+async function _renderParamGlobal() {
+  const cont  = document.getElementById('param-global');
+  if (!cont) return;
+  const instId = USUARIO_ACTUAL.institucion_id;
+
+  const [tiposEvalRes, tiposJustRes, tiposEventoRes] = await Promise.all([
+    sb.from('tipos_evaluacion').select('*').eq('institucion_id', instId).order('nombre'),
+    sb.from('tipos_justificacion').select('*').eq('institucion_id', instId).order('nombre'),
+    sb.from('tipos_evento').select('*').eq('institucion_id', instId).order('nombre'),
+  ]);
+
+  const tiposEval   = tiposEvalRes.data  || [];
+  const tiposJust   = tiposJustRes.data  || [];
+  const tiposEvento = tiposEventoRes.data || [];
+
+  cont.innerHTML = `
+    <div class="sec-lb" style="margin-top:18px">Configuración general (todos los niveles)</div>
+
+    <!-- TIPOS EVALUACIÓN -->
+    <div class="card">
+      <div class="card-t">Tipos de evaluación</div>
+      <div id="lista-tipos-eval">
+        ${_renderListaTipos(tiposEval, 'tipos_evaluacion', 'global', 'lista-tipos-eval')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="new-tipo-eval-global" placeholder="Nuevo tipo de evaluación" style="flex:1">
+        <button class="btn-s" onclick="_agregarTipo('tipos_evaluacion','new-tipo-eval-global','global','lista-tipos-eval')">Agregar</button>
+      </div>
+    </div>
+
+    <!-- TIPOS JUSTIFICACIÓN -->
+    <div class="card">
+      <div class="card-t">Tipos de justificación de asistencia</div>
+      <div id="lista-tipos-just">
+        ${_renderListaTipos(tiposJust, 'tipos_justificacion', 'global', 'lista-tipos-just')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="new-tipo-just-global" placeholder="Nuevo tipo de justificación" style="flex:1">
+        <button class="btn-s" onclick="_agregarTipo('tipos_justificacion','new-tipo-just-global','global','lista-tipos-just')">Agregar</button>
+      </div>
+    </div>
+
+    <!-- TIPOS EVENTO -->
+    <div class="card">
+      <div class="card-t">Tipos de eventos de agenda</div>
+      <div id="lista-tipos-evento">
+        ${_renderListaTipos(tiposEvento, 'tipos_evento', 'global', 'lista-tipos-evento')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input type="text" id="new-tipo-evento-global" placeholder="Nuevo tipo de evento" style="flex:1">
+        <button class="btn-s" onclick="_agregarTipo('tipos_evento','new-tipo-evento-global','global','lista-tipos-evento')">Agregar</button>
+      </div>
+    </div>`;
+}
+
 function _renderListaTipos(lista, tabla, nivel, listaId) {
   if (!lista.length) return '<div style="color:var(--txt2);font-size:11px;padding:6px 0">Sin tipos definidos</div>';
   return lista.map(t => `
@@ -1973,7 +1990,8 @@ async function _guardarTipoEdit(id, tabla, nivel, listaId) {
   if (!nombre) return;
   const { error } = await sb.from(tabla).update({ nombre }).eq('id', id);
   if (error) { alert('Error: ' + error.message); return; }
-  await _renderParamNivel(nivel);
+  if (nivel === 'global') await _renderParamGlobal();
+  else await _renderParamNivel(nivel);
 }
 
 async function _guardarConfigAsistencia(nivel, existingId) {
@@ -2034,7 +2052,8 @@ async function _togTipoActivo(tabla, id, listaId, nivel) {
   const { data: curr } = await sb.from(tabla).select('activo').eq('id', id).single();
   const { error } = await sb.from(tabla).update({ activo: !curr?.activo }).eq('id', id);
   if (error) { alert('Error: ' + error.message); return; }
-  await _renderParamNivel(nivel);
+  if (nivel === 'global') await _renderParamGlobal();
+  else await _renderParamNivel(nivel);
 }
 
 async function _agregarTipo(tabla, inputId, nivel, listaId) {
@@ -2043,12 +2062,12 @@ async function _agregarTipo(tabla, inputId, nivel, listaId) {
   if (!nombre) return;
 
   const datos = { nombre, activo: true, institucion_id: USUARIO_ACTUAL.institucion_id };
-  if (tabla !== 'tipos_evento') datos.nivel = nivel;
 
   const { error } = await sb.from(tabla).insert([datos]);
   if (error) { alert('Error: ' + error.message); return; }
   if (inp) inp.value = '';
-  await _renderParamNivel(nivel);
+  if (nivel === 'global') await _renderParamGlobal();
+  else await _renderParamNivel(nivel);
 }
 
 function _onPeriodoFecha(periodoId, campo, inputId) {
