@@ -381,3 +381,27 @@ function togglePass() {
     eyeClosed.style.display = '';
   }
 }
+
+// ============ IA ASSISTANT ============
+async function llamarIA(action, payload) {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const response = await fetch(
+      `https://vxsgzutluqfonhakiltz.supabase.co/functions/v1/ai-assistant`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ action, payload })
+      }
+    );
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    return data.result;
+  } catch (err) {
+    console.error("Error IA:", err);
+    return null;
+  }
+}
