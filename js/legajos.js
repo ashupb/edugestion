@@ -973,18 +973,54 @@ async function _generarResumenIA(alumnoId) {
     </div>`;
 
   try {
-    const [asistRes, notasRes, probRes, obsRes] = await Promise.all([
-      sb.from('asistencia').select('estado').eq('alumno_id', alumnoId).limit(60),
-      sb.from('calificaciones').select('nota,materias(nombre)').eq('alumno_id', alumnoId).not('nota', 'is', null),
-      sb.from('problematicas').select('titulo,urgencia,estado').eq('alumno_id', alumnoId).in('estado', ['abierta','en_seguimiento']),
-      sb.from('observaciones_legajo').select('texto,privada,created_at').eq('alumno_id', alumnoId).order('created_at', { ascending: false }).limit(5),
-    ]);
+    // Queries secuenciales para loguear cada error por separado
+    const asistRes = await sb.from('asistencia')
+      .select('estado')
+      .eq('alumno_id', alumnoId)
+      .limit(60);
+    if (asistRes.error) console.error('[IA] asistencia:', asistRes.error);
 
+    const notasRes = await sb.from('calificaciones')
+      .select('nota,materias(nombre)')
+      .eq('alumno_id', alumnoId)
+      .not('nota', 'is', null);
+    if (notasRes.error) console.error('[IA] calificaciones:', notasRes.error);
+
+    // Problematicas individuales (alumno_id directo en la tabla)
+    const probDirRes = await sb.from('problematicas')
+      .select('titulo,urgencia,estado')
+      .eq('alumno_id', alumnoId)
+      .in('estado', ['abierta','en_seguimiento']);
+    if (probDirRes.error) console.error('[IA] problematicas directas:', probDirRes.error);
+
+    // Problematicas grupales: el alumno aparece en problematica_alumnos
+    let probGrupales = [];
+    const probAlRes = await sb.from('problematica_alumnos')
+      .select('problematica_id')
+      .eq('alumno_id', alumnoId);
+    if (!probAlRes.error && probAlRes.data?.length) {
+      const grpIds = probAlRes.data.map(r => r.problematica_id);
+      const { data: pg } = await sb.from('problematicas')
+        .select('titulo,urgencia,estado')
+        .in('id', grpIds)
+        .in('estado', ['abierta','en_seguimiento']);
+      probGrupales = pg || [];
+    }
+
+    const obsRes = await sb.from('observaciones_legajo')
+      .select('texto,privada,created_at')
+      .eq('alumno_id', alumnoId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (obsRes.error) console.error('[IA] observaciones:', obsRes.error);
+
+    // Calcular % asistencia
     const asistencia = asistRes.data || [];
     const total      = asistencia.length;
     const presentes  = asistencia.filter(r => ['presente','tardanza','media_falta'].includes(r.estado)).length;
     const pctAsist   = total ? Math.round(presentes / total * 100) : null;
 
+    // Agrupar notas por materia
     const porMateria = {};
     (notasRes.data || []).forEach(n => {
       const m = n.materias?.nombre || '—';
@@ -996,16 +1032,23 @@ async function _generarResumenIA(alumnoId) {
       promedio: (ns.reduce((a, b) => a + b, 0) / ns.length).toFixed(1),
     }));
 
+    const todasSituaciones = [
+      ...(probDirRes.data || []),
+      ...probGrupales,
+    ].map(p => ({ titulo: p.titulo, urgencia: p.urgencia }));
+
     const payload = {
-      alumno:               `${_legAlumnoSel.apellido}, ${_legAlumnoSel.nombre}`,
-      curso:                `${_legCursoSel?.nombre || ''} ${_legCursoSel?.division || ''}`.trim(),
-      nivel:                _legCursoSel?.nivel || '',
-      semaforo:             _legSemMap[alumnoId] || 'verde',
-      asistencia_pct:       pctAsist,
-      calificaciones:       resumenNotas,
-      situaciones_activas:  (probRes.data || []).map(p => ({ titulo: p.titulo, urgencia: p.urgencia })),
-      observaciones:        (obsRes.data || []).filter(o => !o.privada).map(o => o.texto),
+      alumno:              `${_legAlumnoSel.apellido}, ${_legAlumnoSel.nombre}`,
+      curso:               `${_legCursoSel?.nombre || ''} ${_legCursoSel?.division || ''}`.trim(),
+      nivel:               _legCursoSel?.nivel || '',
+      semaforo:            _legSemMap[alumnoId] || 'verde',
+      asistencia_pct:      pctAsist,
+      calificaciones:      resumenNotas,
+      situaciones_activas: todasSituaciones,
+      observaciones:       (obsRes.data || []).filter(o => !o.privada).map(o => o.texto),
     };
+
+    console.log('[IA] payload enviado:', JSON.stringify(payload, null, 2));
 
     const resultado = await llamarIA('sintesis_legajo', payload);
     if (!resultado) throw new Error('Sin respuesta');
