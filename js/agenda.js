@@ -514,12 +514,12 @@ function abrirFormEvento(eventoExistente = null) {
 
         <div>
           <div class="sec-lb">Fecha inicio *</div>
-          <input type="date" id="ev-fecha-ini" class="input-fecha" value="${e.fecha_inicio||''}">
+          ${renderFechaInput('ev-fecha-ini', e.fecha_inicio||'')}
         </div>
 
         <div>
           <div class="sec-lb">Fecha fin (si dura varios días)</div>
-          <input type="date" id="ev-fecha-fin" class="input-fecha" value="${e.fecha_fin||''}">
+          ${renderFechaInput('ev-fecha-fin', e.fecha_fin||'')}
         </div>
 
         <div>
@@ -707,7 +707,7 @@ async function guardarEvento(eventoId) {
   eventoId = eventoId || '';
 
   const nombre   = document.getElementById('ev-nombre')?.value?.trim();
-  const fechaIni = document.getElementById('ev-fecha-ini')?.value;
+  const fechaIni = getFechaInput('ev-fecha-ini');
 
   if (!nombre)   { alert('El nombre es obligatorio.'); return; }
   if (!fechaIni) { alert('La fecha de inicio es obligatoria.'); return; }
@@ -719,7 +719,7 @@ async function guardarEvento(eventoId) {
     fechaNorm = `${partes[2]}-${partes[0].padStart(2,'0')}-${partes[1].padStart(2,'0')}`;
   }
 
-  const fechaFinRaw = document.getElementById('ev-fecha-fin')?.value || '';
+  const fechaFinRaw = getFechaInput('ev-fecha-fin') || '';
   let fechaFin = fechaFinRaw || null;
   if (fechaFinRaw && fechaFinRaw.includes('/')) {
     const partes = fechaFinRaw.split('/');
@@ -1039,7 +1039,7 @@ async function agregarEventoCurso() {
       </select>
 
       <div class="sec-lb">Fecha</div>
-      <input type="date" id="ev-curso-fecha" class="input-fecha" value="${hoy}" style="margin-bottom:10px">
+      ${renderFechaInput('ev-curso-fecha', hoy, {wrapStyle:'margin-bottom:10px'})}
 
       <div class="sec-lb">Hora (opcional)</div>
       <select id="ev-curso-hora" class="sel-estilizado" style="margin-bottom:10px">
@@ -1062,7 +1062,7 @@ async function guardarEventoCurso() {
   const cursoId = document.getElementById('ev-curso-curso')?.value;
   const titulo  = document.getElementById('ev-curso-titulo')?.value?.trim();
   const tipo    = document.getElementById('ev-curso-tipo')?.value;
-  const fecha   = document.getElementById('ev-curso-fecha')?.value;
+  const fecha   = getFechaInput('ev-curso-fecha');
   const hora    = document.getElementById('ev-curso-hora')?.value || null;
   const desc    = document.getElementById('ev-curso-desc')?.value || null;
 

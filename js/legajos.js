@@ -367,7 +367,7 @@ async function _tabDatos(c) {
           </div>
           <div class="leg-dato">
             <label class="leg-dato-l">Fecha de nacimiento</label>
-            <input type="date" id="leg-fnac" value="${alumno.fecha_nacimiento || ''}">
+            ${renderFechaInput('leg-fnac', alumno.fecha_nacimiento || '')}
           </div>
         </div>
         <button class="btn-p" style="margin-top:12px;font-size:11px" onclick="_guardarDatosAlumno('${alumno.id}')">Guardar datos</button>
@@ -406,7 +406,7 @@ async function _guardarDatosAlumno(alumnoId) {
     apellido,
     nombre,
     dni:               document.getElementById('leg-dni')?.value.trim()  || null,
-    fecha_nacimiento:  document.getElementById('leg-fnac')?.value        || null,
+    fecha_nacimiento:  getFechaInput('leg-fnac')                          || null,
   }).eq('id', alumnoId);
   if (error) { alert('Error: ' + error.message); return; }
   // Actualizar cache local
@@ -734,7 +734,7 @@ function _mostrarFormEOE(alumnoId) {
           <option>Derivación externa</option><option>Reunión de equipo</option>
           <option>Seguimiento</option><option>Otro</option>
         </select>
-        <input type="date" id="eoe-fecha" value="${hoyISO()}">
+        ${renderFechaInput('eoe-fecha', hoyISO())}
       </div>
       <textarea id="eoe-desc" rows="3" placeholder="Descripción de la intervención..."></textarea>
       <input type="text" id="eoe-deriv" placeholder="Derivación a (si aplica)" style="margin-top:8px">
@@ -754,7 +754,7 @@ async function _guardarIntervencionEOE(alumnoId) {
     tipo:           document.getElementById('eoe-tipo')?.value  || null,
     descripcion:    desc,
     derivacion:     document.getElementById('eoe-deriv')?.value || null,
-    fecha:          document.getElementById('eoe-fecha')?.value || hoyISO(),
+    fecha:          getFechaInput('eoe-fecha')                  || hoyISO(),
   });
   if (error) { alert('Error: ' + error.message); return; }
   await _tabEOE(document.getElementById('leg-tab-contenido'));

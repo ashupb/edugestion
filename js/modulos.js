@@ -422,9 +422,9 @@ async function _abrirFormObj(objId) {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div><label class="lbl">Fecha inicio</label>
-          <input type="date" id="fo-inicio" value="${obj?.fecha_inicio||''}"></div>
+          ${renderFechaInput('fo-inicio', obj?.fecha_inicio||'')}</div>
         <div><label class="lbl">Fecha cierre estimada</label>
-          <input type="date" id="fo-cierre" value="${obj?.fecha_cierre||''}"></div>
+          ${renderFechaInput('fo-cierre', obj?.fecha_cierre||'')}</div>
       </div>
       <div><label class="lbl">Progreso actual (%)</label>
         <input type="number" id="fo-prog" min="0" max="100" value="${prog}"></div>
@@ -471,8 +471,8 @@ async function _guardarFormObj(objId) {
     meta_descripcion:    document.getElementById('fo-meta')?.value    || null,
     responsable_ids:     responsable_ids.length ? responsable_ids : null,
     responsable_texto,
-    fecha_inicio:        document.getElementById('fo-inicio')?.value  || null,
-    fecha_cierre:        document.getElementById('fo-cierre')?.value  || null,
+    fecha_inicio:        getFechaInput('fo-inicio')                    || null,
+    fecha_cierre:        getFechaInput('fo-cierre')                    || null,
     progreso:            Math.min(100, Math.max(0, parseInt(document.getElementById('fo-prog')?.value)||0)),
     frecuencia_medicion: document.getElementById('fo-freq')?.value    || 'mensual',
     umbral_mejora:       Math.min(100, Math.max(1, parseInt(document.getElementById('fo-umbral-m')?.value)||10)),
@@ -539,7 +539,7 @@ async function _abrirFormInc(objId) {
       <div><label class="lbl">Medida adoptada (opcional)</label>
         <input type="text" id="inc-medida" placeholder="Ej: Llamado a padres, amonestación, acuerdo de convivencia..."></div>
       <div><label class="lbl">Fecha</label>
-        <input type="date" id="inc-fecha" value="${hoy}" style="max-width:180px"></div>
+        ${renderFechaInput('inc-fecha', hoy, {wrapStyle:'max-width:360px'})}</div>
     </div>`;
   const btns = `
     <button class="btn-s" onclick="_cerrarModalObj('modal-form-inc')">Cancelar</button>

@@ -310,6 +310,63 @@ function renderBottomNav() {
     </button>`).join('');
 }
 
+// ── FECHA INPUT PERSONALIZADO ────────────────────────
+const _MESES_ESP = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function renderFechaInput(id, iso, opts) {
+  opts = opts || {};
+  const parts = (iso || '').split('-');
+  const y = parts[0] || '', m = parts[1] || '', d = parts[2] || '';
+  const mOpts = _MESES_ESP.map((mn, i) => {
+    const val = String(i + 1).padStart(2, '0');
+    return `<option value="${val}"${m === val ? ' selected' : ''}>${mn}</option>`;
+  }).join('');
+  const sty = 'padding:8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf);color:var(--txt);font-size:13px;font-family:inherit;box-sizing:border-box';
+  const oc  = opts.onchange ? ` onchange="${opts.onchange}"` : '';
+  const ws  = opts.wrapStyle ? opts.wrapStyle + ';' : '';
+  return `<div id="${id}-wrap" style="${ws}display:flex;gap:4px;align-items:center">` +
+    `<input type="text" inputmode="numeric" id="${id}-d" placeholder="DD" value="${d}" maxlength="2" style="${sty};width:46px;text-align:center"${oc}>` +
+    `<span style="color:var(--txt2);padding:0 2px">/</span>` +
+    `<select id="${id}-m" style="${sty};flex:1"${oc}><option value="">Mes</option>${mOpts}</select>` +
+    `<span style="color:var(--txt2);padding:0 2px">/</span>` +
+    `<input type="text" inputmode="numeric" id="${id}-y" placeholder="AAAA" value="${y}" maxlength="4" style="${sty};width:60px;text-align:center"${oc}>` +
+    `</div>`;
+}
+
+function getFechaInput(id) {
+  const d = String(document.getElementById(id + '-d')?.value || '').padStart(2, '0');
+  const m = document.getElementById(id + '-m')?.value || '';
+  const y = document.getElementById(id + '-y')?.value || '';
+  if (!m || !y || d === '00') return '';
+  return `${y}-${m}-${d}`;
+}
+
+function _resetFechaInput(id, iso) {
+  const [y, m, d] = (iso || '').split('-');
+  const dEl = document.getElementById(id + '-d');
+  const mEl = document.getElementById(id + '-m');
+  const yEl = document.getElementById(id + '-y');
+  if (dEl) dEl.value = parseInt(d, 10);
+  if (mEl) mEl.value = m;
+  if (yEl) yEl.value = y;
+}
+
+function validarFechaHabilCustom(id) {
+  const iso = getFechaInput(id);
+  if (!iso) return;
+  const hoy = hoyISO();
+  if (iso > hoy) {
+    alert('No podés seleccionar una fecha futura.');
+    _resetFechaInput(id, diaHabilMasReciente(hoy));
+    return;
+  }
+  if (!esFechaHabil(iso)) {
+    alert('Por favor seleccioná un día hábil (lunes a viernes).');
+    _resetFechaInput(id, diaHabilMasReciente(iso));
+  }
+}
+
 function togglePass() {
   const inp = document.getElementById('inp-pass');
   const eyeOpen   = document.getElementById('ojo-abierto');

@@ -436,7 +436,7 @@ async function rAsistPreceptor() {
 
     <div class="sec-lb">Editar lista de otro día</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-      <input type="date" id="fecha-prec-hist" class="input-fecha" value="${diaHabilMasReciente(hoy)}" max="${hoy}" onchange="validarFechaHabilInput(this)" style="flex:1;min-width:140px">
+      ${renderFechaInput('fecha-prec-hist', diaHabilMasReciente(hoy), {wrapStyle:'flex:1;min-width:140px', onchange:"validarFechaHabilCustom('fecha-prec-hist')"})}
       <select id="curso-prec-hist" class="sel-estilizado" style="flex:1;min-width:140px">
         ${cursos.map(cu=>`<option value="${cu.id}|${nivel}">${cu.nombre}${cu.division}</option>`).join('')}
       </select>
@@ -455,7 +455,7 @@ async function rAsistPreceptor() {
 }
 
 function editarListaHistorica() {
-  const fecha  = document.getElementById('fecha-prec-hist')?.value;
+  const fecha  = getFechaInput('fecha-prec-hist');
   const val    = document.getElementById('curso-prec-hist')?.value;
   if (!fecha || !val) return;
   const [cursoId, nivel] = val.split('|');
@@ -607,7 +607,7 @@ async function rAsistDocente() {
 
       <div id="sel-fecha-doc" style="display:none;margin-bottom:10px">
         <div class="sec-lb">Fecha (podés cargar días anteriores)</div>
-        <input type="date" id="fecha-doc" class="input-fecha" value="${diaHabilMasReciente(hoy)}" max="${hoy}" onchange="validarFechaHabilInput(this)">
+        ${renderFechaInput('fecha-doc', diaHabilMasReciente(hoy), {onchange:"validarFechaHabilCustom('fecha-doc')"})}
       </div>
 
       <button class="btn-p" id="btn-ir-lista-doc" style="width:100%;display:none" onclick="irListaDocente()">
@@ -654,7 +654,7 @@ async function irListaDocente() {
   const cursoId   = window._docCursoSel;
   const materiaId = window._docMatSel;
   const nivel     = window._docNivelSel || 'secundario';
-  const fecha     = document.getElementById('fecha-doc')?.value;
+  const fecha     = getFechaInput('fecha-doc');
   if (!cursoId)   { alert('Elegí una clase.'); return; }
   if (!materiaId) { alert('Elegí una clase.'); return; }
   if (!HORA_SEL)  { alert('Elegí la hora.'); return; }

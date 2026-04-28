@@ -812,11 +812,7 @@ async function crearInstancia(cursoId, materiaId, periodoId, nivel) {
         <!-- Fecha -->
         <div style="margin-bottom:16px">
           <label style="display:block;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:6px">Fecha</label>
-          <input type="date" id="inst-fecha" value="${hoy}"
-            style="width:100%;padding:10px 12px;border:1.5px solid var(--brd);border-radius:10px;font-size:13px;
-              background:var(--surf);color:var(--txt);font-family:inherit;box-sizing:border-box;
-              transition:border-color .15s;outline:none"
-            onfocus="this.style.borderColor='var(--verde)'" onblur="this.style.borderColor='var(--brd)'">
+          ${renderFechaInput('inst-fecha', hoy)}
         </div>
 
         ${instExist?.length ? `
@@ -866,7 +862,7 @@ function checkRecupModal(sel) {
 async function guardarInstancia(cursoId, materiaId, periodoId) {
   const nombre  = document.getElementById('inst-nombre')?.value?.trim();
   const tipoId  = document.getElementById('inst-tipo')?.value;
-  const fecha   = document.getElementById('inst-fecha')?.value;
+  const fecha   = getFechaInput('inst-fecha');
   const origId  = document.getElementById('inst-orig')?.value || null;
   const desc    = document.getElementById('inst-desc')?.value || null;
 

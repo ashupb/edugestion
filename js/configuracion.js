@@ -988,7 +988,7 @@ async function _abrirModalAlumno(alumnoId) {
     </div>
     <div class="adm-form-row">
       <label class="adm-label">Fecha de nacimiento</label>
-      <input type="date" id="mal-fnac" value="${al?.fecha_nacimiento || ''}">
+      ${renderFechaInput('mal-fnac', al?.fecha_nacimiento || '')}
     </div>
     <div class="adm-form-row">
       <label class="adm-label">Curso</label>
@@ -1005,7 +1005,7 @@ async function _guardarAlumno(alumnoId) {
   const nombre           = document.getElementById('mal-nombre')?.value?.trim();
   const apellido         = document.getElementById('mal-apellido')?.value?.trim();
   const dni              = document.getElementById('mal-dni')?.value?.trim();
-  const fecha_nacimiento = document.getElementById('mal-fnac')?.value || null;
+  const fecha_nacimiento = getFechaInput('mal-fnac') || null;
   const curso_id         = document.getElementById('mal-curso')?.value;
 
   if (!nombre || !apellido) { alert('Nombre y apellido son requeridos.'); return; }
@@ -1819,14 +1819,12 @@ async function _renderParamNivel(nivel) {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div>
                 <div class="adm-label">Inicio</div>
-                <input type="date" value="${p.fecha_inicio || ''}"
-                  onchange="_actualizarPeriodo('${p.id}','fecha_inicio',this.value)">
+                ${renderFechaInput(`per-${p.id}-ini`, p.fecha_inicio || '', {onchange:`_onPeriodoFecha('${p.id}','fecha_inicio','per-${p.id}-ini')`})}
                 ${p.fecha_inicio ? `<div style="font-size:10px;color:var(--verde);margin-top:3px">${_fmtP(p.fecha_inicio)}</div>` : ''}
               </div>
               <div>
                 <div class="adm-label">Fin</div>
-                <input type="date" value="${p.fecha_fin || ''}"
-                  onchange="_actualizarPeriodo('${p.id}','fecha_fin',this.value)">
+                ${renderFechaInput(`per-${p.id}-fin`, p.fecha_fin || '', {onchange:`_onPeriodoFecha('${p.id}','fecha_fin','per-${p.id}-fin')`})}
                 ${p.fecha_fin ? `<div style="font-size:10px;color:var(--verde);margin-top:3px">${_fmtP(p.fecha_fin)}</div>` : ''}
               </div>
             </div>
@@ -1944,6 +1942,11 @@ async function _agregarTipo(tabla, inputId, nivel, listaId) {
   if (error) { alert('Error: ' + error.message); return; }
   if (inp) inp.value = '';
   await _renderParamNivel(nivel);
+}
+
+function _onPeriodoFecha(periodoId, campo, inputId) {
+  const iso = getFechaInput(inputId);
+  if (iso) _actualizarPeriodo(periodoId, campo, iso);
 }
 
 async function _actualizarPeriodo(id, campo, valor) {
