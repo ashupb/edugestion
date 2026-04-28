@@ -15,7 +15,7 @@ function construirPromptLegajo(p: any): string {
     : 'Sin calificaciones registradas.';
 
   const situacionesTexto = Array.isArray(p.situaciones_activas) && p.situaciones_activas.length
-    ? p.situaciones_activas.map((s: any) => `• ${s.titulo} — urgencia ${s.urgencia}`).join('\n')
+    ? p.situaciones_activas.map((s: any) => `• ${s.tipo} — urgencia ${s.urgencia} — ${s.estado} (${s.seguimiento})`).join('\n')
     : 'Sin situaciones problemáticas activas.';
 
   const eoeTexto = Array.isArray(p.intervenciones_eoe) && p.intervenciones_eoe.length

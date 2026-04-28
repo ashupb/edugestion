@@ -989,7 +989,7 @@ async function _generarResumenIA(alumnoId) {
 
     // Problematicas individuales (alumno_id directo en la tabla)
     const probDirRes = await sb.from('problematicas')
-      .select('titulo,urgencia,estado')
+      .select('tipo,urgencia,estado,descripcion')
       .eq('alumno_id', alumnoId)
       .in('estado', ['abierta','en_seguimiento']);
     if (probDirRes.error) console.error('[IA] problematicas directas:', probDirRes.error);
@@ -1002,7 +1002,7 @@ async function _generarResumenIA(alumnoId) {
     if (!probAlRes.error && probAlRes.data?.length) {
       const grpIds = probAlRes.data.map(r => r.problematica_id);
       const { data: pg } = await sb.from('problematicas')
-        .select('titulo,urgencia,estado')
+        .select('tipo,urgencia,estado,descripcion')
         .in('id', grpIds)
         .in('estado', ['abierta','en_seguimiento']);
       probGrupales = pg || [];
@@ -1023,13 +1023,14 @@ async function _generarResumenIA(alumnoId) {
       .limit(5);
     if (obsRes.error) console.error('[IA] observaciones:', obsRes.error);
 
-    // Calcular % asistencia — misma lógica que _tabAsistencia (días únicos sin hora_clase)
-    const asistencia  = asistRes.data || [];
-    const diasUnicos  = [...new Set(asistencia.filter(r => !r.hora_clase).map(r => r.fecha))];
-    const ausDias     = [...new Set(asistencia.filter(r => !r.hora_clase && r.estado === 'ausente').map(r => r.fecha))];
-    const diasTotal   = diasUnicos.length;
-    const diasAusentes= ausDias.length;
-    const pctAsist    = diasTotal ? Math.round(((diasTotal - diasAusentes) / diasTotal) * 100) : null;
+    // Calcular % asistencia — días únicos sin hora_clase, solo lunes a viernes
+    const asistencia   = asistRes.data || [];
+    const esDiaHabil   = (f) => { const d = new Date(f + 'T12:00:00').getDay(); return d !== 0 && d !== 6; };
+    const diasUnicos   = [...new Set(asistencia.filter(r => !r.hora_clase && esDiaHabil(r.fecha)).map(r => r.fecha))];
+    const ausDias      = [...new Set(asistencia.filter(r => !r.hora_clase && r.estado === 'ausente' && esDiaHabil(r.fecha)).map(r => r.fecha))];
+    const diasTotal    = diasUnicos.length;
+    const diasAusentes = ausDias.length;
+    const pctAsist     = diasTotal ? Math.round(((diasTotal - diasAusentes) / diasTotal) * 100) : null;
 
     // Agrupar notas por materia
     const porMateria = {};
@@ -1046,7 +1047,14 @@ async function _generarResumenIA(alumnoId) {
     const todasSituaciones = [
       ...(probDirRes.data || []),
       ...probGrupales,
-    ].map(p => ({ titulo: p.titulo, urgencia: p.urgencia }));
+    ].map(p => ({
+      tipo:       p.tipo,
+      urgencia:   p.urgencia,
+      estado:     p.estado === 'abierta' ? 'Sin atender' : 'En seguimiento',
+      seguimiento: p.estado === 'abierta'
+        ? 'Sin intervenciones registradas — requiere seguimiento'
+        : 'Con intervenciones registradas',
+    }));
 
     const payload = {
       alumno:              `${_legAlumnoSel.apellido}, ${_legAlumnoSel.nombre}`,
