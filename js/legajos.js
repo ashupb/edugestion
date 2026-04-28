@@ -306,6 +306,12 @@ async function abrirLegajoAlumno(alumnoId) {
       </div>
     </div>
 
+    ${['director_general','directivo_nivel'].includes(USUARIO_ACTUAL?.rol) ? `
+    <div style="margin-top:10px">
+      <button id="leg-ia-btn" class="btn-s" style="font-size:11px;display:flex;align-items:center;gap:5px" onclick="_generarResumenIA('${alumno.id}')">✨ Generar resumen IA</button>
+    </div>
+    <div id="leg-ia-panel"></div>` : ''}
+
     <div class="leg-tabs-scroll">
       <div class="leg-tabs">${tabsHtml}</div>
     </div>
@@ -950,6 +956,81 @@ async function _guardarDoc(alumnoId) {
   });
   if (error) { alert('Error: ' + error.message); return; }
   await _tabDocs(document.getElementById('leg-tab-contenido'));
+}
+
+// ── IA: RESUMEN DEL ALUMNO ────────────────────────────
+async function _generarResumenIA(alumnoId) {
+  const btn   = document.getElementById('leg-ia-btn');
+  const panel = document.getElementById('leg-ia-panel');
+  if (!btn || !panel) return;
+
+  btn.disabled    = true;
+  btn.textContent = 'Generando...';
+  panel.innerHTML = `
+    <div class="loading-state small" style="margin-top:8px">
+      <div class="spinner"></div>
+      <div style="font-size:11px;color:var(--txt2)">Generando resumen...</div>
+    </div>`;
+
+  try {
+    const [asistRes, notasRes, probRes, obsRes] = await Promise.all([
+      sb.from('asistencia').select('estado').eq('alumno_id', alumnoId).limit(60),
+      sb.from('calificaciones').select('nota,materias(nombre)').eq('alumno_id', alumnoId).not('nota', 'is', null),
+      sb.from('problematicas').select('titulo,urgencia,estado').eq('alumno_id', alumnoId).in('estado', ['abierta','en_seguimiento']),
+      sb.from('observaciones_legajo').select('texto,privada,created_at').eq('alumno_id', alumnoId).order('created_at', { ascending: false }).limit(5),
+    ]);
+
+    const asistencia = asistRes.data || [];
+    const total      = asistencia.length;
+    const presentes  = asistencia.filter(r => ['presente','tardanza','media_falta'].includes(r.estado)).length;
+    const pctAsist   = total ? Math.round(presentes / total * 100) : null;
+
+    const porMateria = {};
+    (notasRes.data || []).forEach(n => {
+      const m = n.materias?.nombre || '—';
+      if (!porMateria[m]) porMateria[m] = [];
+      porMateria[m].push(n.nota);
+    });
+    const resumenNotas = Object.entries(porMateria).map(([mat, ns]) => ({
+      materia:  mat,
+      promedio: (ns.reduce((a, b) => a + b, 0) / ns.length).toFixed(1),
+    }));
+
+    const payload = {
+      alumno:               `${_legAlumnoSel.apellido}, ${_legAlumnoSel.nombre}`,
+      curso:                `${_legCursoSel?.nombre || ''} ${_legCursoSel?.division || ''}`.trim(),
+      nivel:                _legCursoSel?.nivel || '',
+      semaforo:             _legSemMap[alumnoId] || 'verde',
+      asistencia_pct:       pctAsist,
+      calificaciones:       resumenNotas,
+      situaciones_activas:  (probRes.data || []).map(p => ({ titulo: p.titulo, urgencia: p.urgencia })),
+      observaciones:        (obsRes.data || []).filter(o => !o.privada).map(o => o.texto),
+    };
+
+    const resultado = await llamarIA('sintesis_legajo', payload);
+    if (!resultado) throw new Error('Sin respuesta');
+
+    panel.innerHTML = `
+      <div class="card" style="margin-top:8px;background:var(--verde-l);border-color:var(--verde)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:600;color:var(--verde)">✨ Resumen generado por IA</div>
+          <button class="btn-ghost" style="font-size:10px" onclick="navigator.clipboard.writeText(document.getElementById('leg-ia-text').textContent)">Copiar</button>
+        </div>
+        <div id="leg-ia-text" style="font-size:11px;color:var(--txt);line-height:1.6;white-space:pre-wrap">${resultado}</div>
+        <div style="font-size:9px;color:var(--txt3);margin-top:8px">Generado con IA · Solo orientativo</div>
+      </div>`;
+  } catch(e) {
+    panel.innerHTML = `
+      <div style="font-size:11px;color:var(--rojo);margin-top:8px;padding:10px;background:var(--rojo-l);border-radius:8px">
+        No se pudo generar el texto. Intentá más tarde.
+      </div>`;
+  } finally {
+    if (btn) {
+      btn.disabled    = false;
+      btn.textContent = '✨ Generar resumen IA';
+      btn.style.display = 'flex';
+    }
+  }
 }
 
 // ── ESTILOS ───────────────────────────────────────────

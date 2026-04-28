@@ -132,6 +132,78 @@ Varios módulos usan una función `detectarMigracion()` que cachea si ciertas co
 ### Carga de scripts
 El orden de `<script>` en `index.html` importa porque todo es global. `config.js` va primero (define `sb`), `main.js` y `auth.js` después, luego los módulos.
 
+## Integración de IA
+
+Kairu integra IA mediante una Supabase Edge Function que llama a la API de Anthropic.
+
+### Infraestructura
+
+- **Edge Function**: `supabase/functions/ai-assistant/index.ts`
+- **URL**: `https://vxsgzutluqfonhakiltz.supabase.co/functions/v1/ai-assistant`
+- **Modelo**: `claude-haiku-4-5` (bajo costo)
+- **Secret**: `ANTHROPIC_API_KEY` configurado en Supabase → Settings → Edge Functions → Secrets
+- **Helper global**: `llamarIA(action, payload)` al final de `js/main.js` — fetch autenticado con token de sesión del usuario
+
+La función recibe `{ action, payload }` y devuelve `{ result }`.
+
+### Acciones disponibles
+
+| Acción | Descripción |
+|--------|-------------|
+| `sintesis_legajo` | Resumen narrativo del alumno para equipo docente |
+| `observacion_pedagogica` | Redacción formal a partir de notas coloquiales del docente |
+| `alerta_contexto` | Análisis contextualizado de situación del alumno con sugerencia de acción |
+| `analisis_institucional` | Resumen ejecutivo mensual para directivos |
+
+### Modelo de negocio — reglas críticas
+
+El costo de la API lo paga la dueña del sistema (por tokens). Cada institución tiene una cuota mensual incluida en su plan.
+
+**Reglas que no se deben romper:**
+- **Nunca** llamar `llamarIA()` en eventos automáticos, loops o carga de página
+- **Solo** en acciones explícitas del usuario (botón "Generar con IA")
+- Los botones IA son visibles **únicamente** para `director_general` y `directivo_nivel`
+- El botón debe deshabilitarse mientras espera (evitar doble llamada)
+- Siempre mostrar spinner/texto de carga mientras espera
+- Siempre manejar error con mensaje amigable: "No se pudo generar el texto. Intentá más tarde."
+
+### Tabla de consumo (pendiente de crear en Supabase)
+
+```sql
+CREATE TABLE ia_uso (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  institucion_id uuid REFERENCES instituciones(id),
+  usuario_id uuid REFERENCES usuarios(id),
+  accion text NOT NULL,
+  tokens_input integer,
+  tokens_output integer,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+Después de cada llamada exitosa, insertar un registro con `data.usage.input_tokens` y `data.usage.output_tokens` que devuelve la Edge Function.
+
+### Implementaciones pendientes (en orden)
+
+**Prioridad 1 — legajos.js**
+Botón "✨ Generar resumen IA" en la vista detalle del alumno (`rLeg`):
+1. Deshabilitar botón + mostrar spinner "Generando resumen..."
+2. Recopilar datos ya en pantalla (nombre, curso, asistencia, calificaciones, intervenciones, observaciones)
+3. Llamar `llamarIA("sintesis_legajo", payload)`
+4. Mostrar resultado en panel expandible con fondo suave debajo de los datos del alumno
+5. Botón "Copiar" para copiar al portapapeles
+
+**Prioridad 2 — dashboard.js**
+En la sección de alertas del dashboard, agregar link pequeño "Ver análisis IA →" por cada alumno en alerta.
+Al hacer clic (nunca automático) → modal con resultado de `llamarIA("alerta_contexto", payload)`.
+
+**Prioridad 3 — dashboard.js**
+Nueva tarjeta "Análisis institucional del mes" al final del dashboard, solo para `director_general`.
+Botón "✨ Generar análisis" — una vez por día (guardar timestamp en `localStorage`).
+Llama `llamarIA("analisis_institucional", payload)` con métricas agregadas del mes.
+
+---
+
 ## Design System
 
 Ver `.claude/skills/kairu-design/SKILL.md` para la guía completa de:
