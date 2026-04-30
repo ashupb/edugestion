@@ -1458,15 +1458,25 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
   const usaConc    = esCiclo1 || escala2 === 'conceptual';
 
   const cargarVista = async () => {
-    const [alumnosRes, materiasRes] = await Promise.all([
+    const [alumnosRes, materiasRes, instContRes] = await Promise.all([
       sb.from('alumnos').select('id,nombre,apellido')
         .eq('curso_id', cursoId).eq('activo', true).order('apellido'),
       sb.from('materias').select('id,nombre')
         .eq('institucion_id', instId).eq('nivel', nivel)
         .eq('tipo', 'comun').eq('activo', true).order('nombre'),
+      PERIODO_SEL
+        ? sb.from('instancias_calificacion').select('alumno_id,materia_id')
+            .eq('curso_id', cursoId).eq('periodo_id', PERIODO_SEL)
+        : Promise.resolve({ data: [] }),
     ]);
     const alumnos  = alumnosRes.data || [];
     const materias = materiasRes.data || [];
+
+    const instCounts = {};
+    (instContRes.data || []).forEach(r => {
+      const k = `${r.alumno_id}:${r.materia_id}`;
+      instCounts[k] = (instCounts[k] || 0) + 1;
+    });
 
     // Calificaciones sin instancia (formato primaria: una nota por alumno × materia × período)
     let califData = [];
@@ -1483,14 +1493,15 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
       cIdx[k] = r;
     });
 
-    window._pGcIdx     = cIdx;
-    window._pGalumnos  = alumnos;
-    window._pGmaterias = materias;
-    window._pGcursoId  = cursoId;
-    window._pGperiodo  = PERIODO_SEL;
-    window._pGinstId   = instId;
-    window._pGusaConc  = usaConc;
-    window._pGescala   = escalaConc;
+    window._pGcIdx       = cIdx;
+    window._pGalumnos    = alumnos;
+    window._pGmaterias   = materias;
+    window._pGcursoId    = cursoId;
+    window._pGperiodo    = PERIODO_SEL;
+    window._pGinstId     = instId;
+    window._pGusaConc    = usaConc;
+    window._pGescala     = escalaConc;
+    window._pGinstCounts = instCounts;
 
     // Valor actual de la celda (desde DB)
     const getCellVal = (aId, mId) => {
@@ -1530,10 +1541,23 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
         style="width:44px;text-align:center;border:1.5px solid var(--brd);border-radius:4px;
           padding:2px 3px;font-size:11px;font-weight:700;background:var(--surf)">`;
 
-    const mkCell = (id, cur) => editable
-      ? (usaConc ? mkSelect(id, cur) : mkNumber(id, cur))
-      : `${cur ? `<span style="font-size:11px;font-weight:700">${cur}</span>`
-               : `<span class="grilla-nd">—</span>`}`;
+    const mkCell = (al, m, cur, count) => {
+      const clr = cur
+        ? (usaConc ? 'var(--txt)' : NOTA_COLOR(parseFloat(cur), nivel, nombreCurso))
+        : 'var(--txt3)';
+      const badge = count > 0
+        ? `<div style="font-size:8px;color:var(--txt3);line-height:1.4">${count} eval.</div>`
+        : '';
+      const icon    = editable ? '✏' : '▸';
+      const iconClr = editable ? 'var(--verde)' : 'var(--azul)';
+      return `
+        <div style="text-align:center;cursor:pointer;padding:2px"
+          onclick="abrirPanelInstancias('${al.id}','${m.id}','${cursoId}','${PERIODO_SEL}',${editable})">
+          <span style="font-size:12px;font-weight:700;color:${clr}">${cur || '—'}</span>
+          ${badge}
+          <div style="font-size:9px;color:${iconClr};margin-top:1px">${icon}</div>
+        </div>`;
+    };
 
     const mkPromEditor = (aId, promFinal) => `
       <button onclick="_editarPromPrimG('${aId}')"
@@ -1561,7 +1585,7 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
 
       ${editable ? `
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-        <button class="btn-p" id="btn-guardar-prim" onclick="guardarNotasPrimariaGrado()">💾 Guardar todo</button>
+        <button class="btn-p" id="btn-guardar-prim" onclick="guardarNotasPrimariaGrado()">💾 Guardar promedios</button>
         <span style="font-size:10px;color:var(--txt3)">Los cambios no guardados se perderán</span>
       </div>` : `
       <div style="background:var(--azul-l);border-left:4px solid var(--azul);border-radius:var(--rad);
@@ -1608,7 +1632,7 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
                   </td>
                   ${materias.map(m => `
                     <td style="text-align:center;padding:4px 3px">
-                      ${mkCell(`pg-${al.id}-${m.id}`, getCellVal(al.id, m.id))}
+                      ${mkCell(al, m, getCellVal(al.id, m.id), instCounts[`${al.id}:${m.id}`] || 0)}
                     </td>`).join('')}
                   <td style="background:var(--azul-l);text-align:center;padding:4px 3px">
                     ${promTxt
@@ -1631,7 +1655,7 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
       </div>
       ${editable ? `
       <button class="btn-p" style="width:100%;margin-top:14px"
-        onclick="guardarNotasPrimariaGrado()">💾 Guardar todo</button>` : ''}`}`;
+        onclick="guardarNotasPrimariaGrado()">💾 Guardar promedios</button>` : ''}`}`;
   };
 
   window.cambioPeriodoPrimG = async (pid) => {
@@ -1663,9 +1687,8 @@ async function guardarNotasPrimariaGrado() {
   const btn = document.getElementById('btn-guardar-prim');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
-  const alumnos   = window._pGalumnos  || [];
-  const materias  = window._pGmaterias || [];
-  const cIdx      = window._pGcIdx     || {};
+  const alumnos   = window._pGalumnos || [];
+  const cIdx      = window._pGcIdx    || {};
   const cursoId   = window._pGcursoId;
   const periodoId = window._pGperiodo;
   const instId    = window._pGinstId;
@@ -1674,74 +1697,321 @@ async function guardarNotasPrimariaGrado() {
   let errors = 0;
 
   for (const al of alumnos) {
-    // Guardar nota por materia
-    for (const m of materias) {
-      const el = document.getElementById(`pg-${al.id}-${m.id}`);
-      if (!el) continue;
-      const valor = el.value;
-      if (!valor) continue;
-
-      const existRow = cIdx[`${al.id}:${m.id}`];
-      const datos = {
-        institucion_id: instId,
-        alumno_id:      al.id,
-        materia_id:     m.id,
-        curso_id:       cursoId,
-        periodo_id:     periodoId,
-        instancia_id:   null,
-        registrado_por: USUARIO_ACTUAL.id,
-      };
-      if (usaConc) {
-        datos.promedio_concepto_manual = valor;
-        datos.nota = null;
-      } else {
-        const num = parseFloat(valor);
-        datos.nota = isNaN(num) ? null : num;
-      }
-
-      let err;
-      if (existRow?.id) {
-        ({ error: err } = await sb.from('calificaciones').update(datos).eq('id', existRow.id));
-      } else {
-        ({ error: err } = await sb.from('calificaciones').insert([datos]));
-      }
-      if (err) { errors++; console.error('Error guardando nota:', err.message); }
-    }
-
-    // Guardar promedio manual si fue editado
     const promEl = document.getElementById(`pg-prom-${al.id}`);
-    if (promEl && promEl.value) {
-      const promRow  = cIdx[`${al.id}:prom`];
-      const promDatos = {
-        institucion_id:   instId,
-        alumno_id:        al.id,
-        materia_id:       null,
-        curso_id:         cursoId,
-        periodo_id:       periodoId,
-        instancia_id:     null,
-        promedio_editado: true,
-        registrado_por:   USUARIO_ACTUAL.id,
-      };
-      if (usaConc) {
-        promDatos.promedio_concepto_manual = promEl.value;
-      } else {
-        const num = parseFloat(promEl.value);
-        promDatos.promedio_manual = isNaN(num) ? null : num;
-      }
-      if (promRow?.id) {
-        await sb.from('calificaciones').update(promDatos).eq('id', promRow.id);
-      } else {
-        // Si materia_id tiene constraint NOT NULL en la DB, este insert fallará silenciosamente
-        const { error: promErr } = await sb.from('calificaciones').insert([promDatos]);
-        if (promErr) console.warn('Promedio no guardado (constraint DB):', promErr.message);
-      }
+    if (!promEl || !promEl.value) continue;
+
+    const promRow   = cIdx[`${al.id}:prom`];
+    const promDatos = {
+      institucion_id:   instId,
+      alumno_id:        al.id,
+      materia_id:       null,
+      curso_id:         cursoId,
+      periodo_id:       periodoId,
+      instancia_id:     null,
+      promedio_editado: true,
+      registrado_por:   USUARIO_ACTUAL.id,
+    };
+    if (usaConc) {
+      promDatos.promedio_concepto_manual = promEl.value;
+    } else {
+      const num = parseFloat(promEl.value);
+      promDatos.promedio_manual = isNaN(num) ? null : num;
+    }
+    if (promRow?.id) {
+      const { error } = await sb.from('calificaciones').update(promDatos).eq('id', promRow.id);
+      if (error) { errors++; console.error('Error guardando promedio:', error.message); }
+    } else {
+      const { error: promErr } = await sb.from('calificaciones').insert([promDatos]);
+      if (promErr) console.warn('Promedio no guardado (constraint DB):', promErr.message);
     }
   }
 
-  if (errors) alert(`${errors} nota(s) no se pudieron guardar. Revisá la conexión y reintentá.`);
+  if (errors) alert(`${errors} promedio(s) no se pudo guardar. Revisá la conexión y reintentá.`);
 
   await window.cambioPeriodoPrimG?.(periodoId);
-  if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar todo'; }
+  if (btn) { btn.disabled = false; btn.textContent = '💾 Guardar promedios'; }
+}
+
+// ═══════════════════════════════════════════════════════
+// PANEL DE INSTANCIAS EVALUATIVAS (PRIMARIA / INICIAL)
+// ═══════════════════════════════════════════════════════
+
+async function abrirPanelInstancias(alumnoId, materiaId, cursoId, periodoId, editable) {
+  const al = (window._pGalumnos  || []).find(a => a.id === alumnoId);
+  const m  = (window._pGmaterias || []).find(x => x.id === materiaId);
+  const nombreAlumno  = al ? `${al.apellido}, ${al.nombre}` : '';
+  const nombreMateria = m?.nombre || '';
+  const periodoNombre = PERIODOS.find(p => p.id === periodoId)?.nombre || '';
+  const usaConc    = window._pGusaConc;
+  const escalaConc = window._pGescala || ['MB', 'B', 'R', 'I'];
+
+  const [instRes, notaFinalRes] = await Promise.all([
+    sb.from('instancias_calificacion').select('*')
+      .eq('alumno_id', alumnoId).eq('materia_id', materiaId)
+      .eq('curso_id', cursoId).eq('periodo_id', periodoId)
+      .order('created_at'),
+    sb.from('calificaciones').select('*')
+      .eq('alumno_id', alumnoId).eq('materia_id', materiaId)
+      .eq('curso_id', cursoId).eq('periodo_id', periodoId)
+      .is('instancia_id', null).maybeSingle(),
+  ]);
+
+  window._panelInst        = (instRes.data || []).map(i => ({ ...i }));
+  window._panelMeta        = { alumnoId, materiaId, cursoId, periodoId, usaConc, escalaConc };
+  window._panelNotaFinalRow = notaFinalRes.data;
+
+  const notaFinalActual = notaFinalRes.data
+    ? (usaConc ? notaFinalRes.data.promedio_concepto_manual : notaFinalRes.data.nota)
+    : null;
+  const promSugerido = _calcPromSugerido(window._panelInst, usaConc, escalaConc);
+
+  const mkValorInput = (cls, val) => usaConc
+    ? `<select class="${cls}" onchange="_actualizarPromSugerido()"
+        style="border:1.5px solid var(--brd);border-radius:6px;padding:4px 6px;font-size:11px;background:var(--surf)">
+        <option value="">—</option>
+        ${escalaConc.map(v => `<option value="${v}" ${(val || '') === v ? 'selected' : ''}>${v}</option>`).join('')}
+       </select>`
+    : `<input type="number" class="${cls}" value="${val || ''}" min="1" max="10" step="0.5"
+        oninput="_actualizarPromSugerido()"
+        style="width:54px;text-align:center;border:1.5px solid var(--brd);border-radius:6px;padding:5px;font-size:12px;font-weight:700;background:var(--surf)">`;
+
+  const mkNotaFinalInput = (val) => usaConc
+    ? `<select id="panel-nota-final"
+        style="border:1.5px solid var(--verde);border-radius:6px;padding:5px 8px;font-size:13px;font-weight:700;background:var(--surf)">
+        <option value="">—</option>
+        ${escalaConc.map(v => `<option value="${v}" ${(val || '') === v ? 'selected' : ''}>${v}</option>`).join('')}
+       </select>`
+    : `<input type="number" id="panel-nota-final" value="${val || ''}" min="1" max="10" step="0.5"
+        style="width:68px;text-align:center;border:1.5px solid var(--verde);border-radius:6px;padding:6px;font-size:14px;font-weight:700;background:var(--surf)">`;
+
+  const renderInstRow = (inst, idx) => editable ? `
+    <div class="panel-inst-row" data-idx="${idx}"
+      style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--brd)">
+      <input type="text" class="panel-inst-nombre"
+        value="${(inst.nombre || '').replace(/"/g, '&quot;')}"
+        placeholder="Ej: Evaluación escrita"
+        style="flex:1;border:1.5px solid var(--brd);border-radius:6px;padding:6px 8px;font-size:11px;background:var(--surf)">
+      ${mkValorInput('panel-inst-valor', usaConc ? inst.valor_conceptual : inst.valor_numerico)}
+      <button onclick="_removeInstRow(${idx})"
+        style="background:none;border:none;cursor:pointer;color:var(--rojo);font-size:16px;padding:2px 4px;line-height:1">✕</button>
+    </div>` : `
+    <div style="display:flex;align-items:center;padding:8px 0;border-bottom:1px solid var(--brd)">
+      <span style="flex:1;font-size:11px;color:var(--txt)">${inst.nombre || '—'}</span>
+      <span style="font-size:12px;font-weight:700">
+        ${usaConc ? (inst.valor_conceptual || '—') : (inst.valor_numerico != null ? inst.valor_numerico : '—')}
+      </span>
+    </div>`;
+
+  document.getElementById('panel-instancias')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'panel-instancias';
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px`;
+  modal.innerHTML = `
+    <div style="background:var(--surf);border-radius:16px;width:100%;max-width:480px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18)">
+      <div style="padding:18px 20px 14px;border-bottom:1px solid var(--brd);display:flex;align-items:flex-start;justify-content:space-between">
+        <div>
+          <div style="font-size:15px;font-weight:700;font-family:'Lora',serif">${nombreAlumno}</div>
+          <div style="font-size:11px;color:var(--txt2)">${nombreMateria} · ${periodoNombre}</div>
+        </div>
+        <button onclick="document.getElementById('panel-instancias').remove()"
+          style="background:var(--surf2);border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px;color:var(--txt2);display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
+
+      <div style="padding:16px 20px">
+        ${editable
+          ? `<button onclick="_addInstRow()" class="btn-s" style="width:100%;margin-bottom:12px;font-size:11px">+ Agregar instancia</button>`
+          : `<div style="background:var(--azul-l);border-left:3px solid var(--azul);border-radius:var(--rad);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--azul);font-weight:600">👁 Solo lectura</div>`}
+
+        <div id="panel-inst-rows">
+          ${window._panelInst.length
+            ? window._panelInst.map((inst, idx) => renderInstRow(inst, idx)).join('')
+            : `<div style="text-align:center;color:var(--txt3);font-size:11px;padding:20px 0">Sin instancias cargadas${editable ? ' · Agregá una arriba' : ''}</div>`}
+        </div>
+
+        <div style="border-top:1px solid var(--brd);margin:14px 0;padding-top:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span style="font-size:11px;color:var(--txt2)">Promedio sugerido</span>
+            <span id="panel-prom-sug" style="font-size:13px;font-weight:700;color:var(--azul)">
+              ${promSugerido != null ? promSugerido : '—'}
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;font-weight:600">Nota final de boletín</span>
+            ${editable
+              ? mkNotaFinalInput(notaFinalActual)
+              : `<span style="font-size:14px;font-weight:700">${notaFinalActual || '—'}</span>`}
+          </div>
+        </div>
+
+        ${editable ? `
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button onclick="guardarPanelInstancias('${alumnoId}','${materiaId}','${cursoId}','${periodoId}')"
+            class="btn-p" style="flex:1">Guardar</button>
+          <button onclick="document.getElementById('panel-instancias').remove()" class="btn-s">Cancelar</button>
+        </div>` : `
+        <button onclick="document.getElementById('panel-instancias').remove()" class="btn-s" style="width:100%">Cerrar</button>`}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function _addInstRow() {
+  const meta      = window._panelMeta;
+  const container = document.getElementById('panel-inst-rows');
+  if (!container || !meta) return;
+
+  const idx        = window._panelInst.length;
+  const escalaConc = meta.escalaConc;
+  window._panelInst.push({ id: null, nombre: '', valor_numerico: null, valor_conceptual: null });
+
+  const mkVal = () => meta.usaConc
+    ? `<select class="panel-inst-valor" onchange="_actualizarPromSugerido()"
+        style="border:1.5px solid var(--brd);border-radius:6px;padding:4px 6px;font-size:11px;background:var(--surf)">
+        <option value="">—</option>
+        ${escalaConc.map(v => `<option value="${v}">${v}</option>`).join('')}
+       </select>`
+    : `<input type="number" class="panel-inst-valor" min="1" max="10" step="0.5"
+        oninput="_actualizarPromSugerido()"
+        style="width:54px;text-align:center;border:1.5px solid var(--brd);border-radius:6px;padding:5px;font-size:12px;font-weight:700;background:var(--surf)">`;
+
+  if (container.querySelector('div:only-child')?.textContent?.includes('Sin instancias')) {
+    container.innerHTML = '';
+  }
+
+  const row = document.createElement('div');
+  row.className = 'panel-inst-row';
+  row.dataset.idx = idx;
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--brd)';
+  row.innerHTML = `
+    <input type="text" class="panel-inst-nombre" value="" placeholder="Ej: Evaluación escrita"
+      style="flex:1;border:1.5px solid var(--brd);border-radius:6px;padding:6px 8px;font-size:11px;background:var(--surf)">
+    ${mkVal()}
+    <button onclick="_removeInstRow(${idx})"
+      style="background:none;border:none;cursor:pointer;color:var(--rojo);font-size:16px;padding:2px 4px;line-height:1">✕</button>`;
+  container.appendChild(row);
+}
+
+function _removeInstRow(idx) {
+  const row = document.querySelector(`.panel-inst-row[data-idx="${idx}"]`);
+  if (row) row.remove();
+  if (window._panelInst[idx]) window._panelInst[idx]._deleted = true;
+  _actualizarPromSugerido();
+  const container = document.getElementById('panel-inst-rows');
+  if (container && !container.querySelector('.panel-inst-row')) {
+    container.innerHTML = `<div style="text-align:center;color:var(--txt3);font-size:11px;padding:20px 0">Sin instancias · Agregá una arriba</div>`;
+  }
+}
+
+function _calcPromSugerido(instancias, usaConc, escalaConc) {
+  const vals = instancias
+    .filter(i => !i._deleted)
+    .map(i => usaConc ? i.valor_conceptual : i.valor_numerico)
+    .filter(v => v !== null && v !== '' && v !== undefined);
+  if (!vals.length) return null;
+  if (usaConc) {
+    const cnt = {};
+    vals.forEach(v => cnt[v] = (cnt[v] || 0) + 1);
+    const maxCnt = Math.max(...Object.values(cnt));
+    return escalaConc.find(v => cnt[v] === maxCnt) || null;
+  }
+  const nums = vals.map(v => parseFloat(v)).filter(v => !isNaN(v));
+  if (!nums.length) return null;
+  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 10) / 10;
+}
+
+function _actualizarPromSugerido() {
+  const meta = window._panelMeta;
+  if (!meta) return;
+  const rows = document.querySelectorAll('.panel-inst-row');
+  const insts = [...rows].map(row => {
+    const valor = row.querySelector('.panel-inst-valor')?.value || '';
+    return meta.usaConc
+      ? { valor_conceptual: valor || null }
+      : { valor_numerico: valor !== '' ? parseFloat(valor) : null };
+  });
+  const prom = _calcPromSugerido(insts, meta.usaConc, meta.escalaConc);
+  const el = document.getElementById('panel-prom-sug');
+  if (el) el.textContent = prom !== null ? String(prom) : '—';
+  const nfEl = document.getElementById('panel-nota-final');
+  if (nfEl && prom !== null && !nfEl.dataset.manual) nfEl.value = String(prom);
+}
+
+async function guardarPanelInstancias(alumnoId, materiaId, cursoId, periodoId) {
+  const saveBtn = document.querySelector('#panel-instancias .btn-p');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Guardando...'; }
+
+  const meta   = window._panelMeta;
+  const instId = USUARIO_ACTUAL.institucion_id;
+  const rows   = document.querySelectorAll('.panel-inst-row');
+
+  const toSave   = [];
+  const toDelete = (window._panelInst || []).filter(i => i._deleted && i.id).map(i => i.id);
+
+  [...rows].forEach(row => {
+    const idx    = parseInt(row.dataset.idx);
+    const orig   = window._panelInst[idx] || {};
+    const nombre = row.querySelector('.panel-inst-nombre')?.value?.trim();
+    const valor  = row.querySelector('.panel-inst-valor')?.value;
+    if (!nombre) return;
+    const entry = {
+      alumno_id:        alumnoId,
+      materia_id:       materiaId,
+      curso_id:         cursoId,
+      periodo_id:       periodoId,
+      institucion_id:   instId,
+      nombre,
+      valor_numerico:   meta.usaConc ? null : (parseFloat(valor) || null),
+      valor_conceptual: meta.usaConc ? (valor || null) : null,
+    };
+    if (orig.id) entry._id = orig.id;
+    toSave.push(entry);
+  });
+
+  let errors = 0;
+
+  if (toDelete.length) {
+    const { error } = await sb.from('instancias_calificacion').delete().in('id', toDelete);
+    if (error) errors++;
+  }
+
+  for (const inst of toSave) {
+    const { _id, ...data } = inst;
+    const { error } = _id
+      ? await sb.from('instancias_calificacion').update(data).eq('id', _id)
+      : await sb.from('instancias_calificacion').insert([data]);
+    if (error) { errors++; console.error('Error guardando instancia:', error.message); }
+  }
+
+  // Guardar nota final de boletín
+  const notaFinalEl  = document.getElementById('panel-nota-final');
+  const notaFinalVal = notaFinalEl?.value;
+  if (notaFinalVal) {
+    const cIdx     = window._pGcIdx || {};
+    const existRow = cIdx[`${alumnoId}:${materiaId}`];
+    const datos = {
+      institucion_id: instId,
+      alumno_id:      alumnoId,
+      materia_id:     materiaId,
+      curso_id:       cursoId,
+      periodo_id:     periodoId,
+      instancia_id:   null,
+      registrado_por: USUARIO_ACTUAL.id,
+    };
+    if (meta.usaConc) {
+      datos.promedio_concepto_manual = notaFinalVal;
+      datos.nota = null;
+    } else {
+      datos.nota = parseFloat(notaFinalVal) || null;
+    }
+    const { error } = existRow?.id
+      ? await sb.from('calificaciones').update(datos).eq('id', existRow.id)
+      : await sb.from('calificaciones').insert([datos]);
+    if (error) { errors++; console.error('Error guardando nota final:', error.message); }
+  }
+
+  if (errors) alert(`${errors} error(s) al guardar. Revisá la conexión.`);
+  document.getElementById('panel-instancias')?.remove();
+  await window.cambioPeriodoPrimG?.(periodoId);
 }
 
 // ─── UTILIDADES ───────────────────────────────────────
