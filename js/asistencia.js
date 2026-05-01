@@ -82,9 +82,9 @@ async function rAsistDirector() {
   asistHoy.forEach(a => { if (contadorEstados[a.estado] !== undefined) contadorEstados[a.estado]++; });
   const totalRegistradosHoy = asistHoy.length;
   const totalAlumnosHoy     = alumnos.length;
-  const pctAsistHoy         = totalAlumnosHoy > 0
-    ? Math.min(100, Math.round((contadorEstados.presente + contadorEstados.tardanza + contadorEstados.media_falta) / totalAlumnosHoy * 100))
-    : 0;
+  const pctAsistHoy         = totalRegistradosHoy > 0
+    ? Math.round((contadorEstados.presente + contadorEstados.tardanza + contadorEstados.media_falta) / totalRegistradosHoy * 100)
+    : null;
 
   // Calcular estado por curso
   const alumnosPorCurso = {};
@@ -101,7 +101,7 @@ async function rAsistDirector() {
     return ids.length > 0 && ids.filter(id => asistSet.has(id)).length < ids.length;
   }).length : 0;
 
-  const pctColor = pctAsistHoy>=85?'var(--verde)':pctAsistHoy>=70?'var(--ambar)':'var(--rojo)';
+  const pctColor = pctAsistHoy === null ? 'var(--txt3)' : pctAsistHoy>=85?'var(--verde)':pctAsistHoy>=70?'var(--ambar)':'var(--rojo)';
   const contCardsHTML = totalRegistradosHoy > 0 ? `
     <div class="mc-asist-grid">
       <div class="mc-asist" style="border-top:3px solid var(--verde)">
@@ -121,7 +121,7 @@ async function rAsistDirector() {
         <div class="mc-asist-l">Tard. / M.F.</div>
       </div>
       <div class="mc-asist" style="border-top:3px solid ${pctColor}">
-        <div class="mc-asist-v" style="color:${pctColor}">${pctAsistHoy}%</div>
+        <div class="mc-asist-v" style="color:${pctColor}">${pctAsistHoy === null ? '—' : pctAsistHoy + '%'}</div>
         <div class="mc-asist-l">Asistencia</div>
       </div>
     </div>` : '';
@@ -1072,12 +1072,11 @@ async function rAsistEOE() {
       : alertas.map(a => {
           const al  = a.alumnos;
           const cu  = al?.cursos;
-          const labels = ['','⚠️ 1° aviso','⚠️ 2° aviso','🔴 3° aviso','🚨 Riesgo regularidad'];
+          const labels = ['','⚠️ Primer aviso','⚠️ Segundo aviso','🔴 Tercer aviso','🚨 Riesgo de regularidad'];
           const cls    = a.tipo_alerta >= 3 ? 'var(--rojo)' : 'var(--ambar)';
           return `
-            <div class="card" style="margin-bottom:8px;padding:12px 14px;border-left:3px solid ${cls};cursor:pointer"
-              onclick="verAlumnoAsist('${al?.id}')">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div class="card" id="alerta-card-${a.id}" style="margin-bottom:8px;padding:12px 14px;border-left:3px solid ${cls}">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer" onclick="verAlumnoAsist('${al?.id}')">
                 <div>
                   <div style="font-size:12px;font-weight:600">${al?.apellido}, ${al?.nombre}</div>
                   <div style="font-size:10px;color:var(--txt2)">${cu?.nombre}${cu?.division} · ${cu?.nivel}</div>
@@ -1087,6 +1086,10 @@ async function rAsistEOE() {
               <div style="font-size:11px;color:var(--txt2);margin-top:6px">
                 ${a.total_faltas} faltas · ${formatFechaLatam(a.fecha)}
               </div>
+              ${USUARIO_ACTUAL.rol === 'preceptor' ? `
+              <div style="margin-top:8px;border-top:1px solid var(--brd);padding-top:8px">
+                <button class="btn-s" style="font-size:11px" onclick="event.stopPropagation();_tomarAccionAlerta('${a.id}',this)">✓ Acción tomada</button>
+              </div>` : ''}
             </div>`;
         }).join('')}`;
 }
@@ -1100,7 +1103,7 @@ async function verAlumnoAsist(alumnoId) {
 
   const [alumnoRes, asistRes, alertasRes] = await Promise.all([
     sb.from('alumnos').select('*, cursos(nombre,division,nivel)').eq('id', alumnoId).single(),
-    sb.from('asistencia').select('*').eq('alumno_id', alumnoId).order('fecha', {ascending:false}).limit(60),
+    sb.from('asistencia').select('*').eq('alumno_id', alumnoId).order('fecha', {ascending:true}),
     sb.from('alertas_asistencia').select('*').eq('alumno_id', alumnoId).order('created_at', {ascending:false}),
   ]);
 
@@ -1121,6 +1124,13 @@ async function verAlumnoAsist(alumnoId) {
 
   const pct   = config.umbral_regularidad ? Math.min(Math.round(totalFaltas/config.umbral_regularidad*100),100) : 0;
   const color = totalFaltas >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : totalFaltas >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
+
+  const anio  = INSTITUCION_ACTUAL?.anio_lectivo || new Date().getFullYear();
+  const desde = `${anio}-01-01`;
+  const hasta = hoyISO();
+
+  window._alumnoAsistFull   = asists;
+  window._alumnoAsistConfig = config;
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -1157,20 +1167,73 @@ async function verAlumnoAsist(alumnoId) {
       </div>
     </div>
 
-    <div class="sec-lb">Historial reciente</div>
-    <div class="card" style="padding:0">
-      ${!asists.length ? '<div style="padding:14px;font-size:11px;color:var(--txt3);text-align:center">Sin registros</div>' :
-        asists.slice(0,20).map(a => {
-          const st = ESTADOS_ASIST[a.estado];
-          return `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--brd)">
-            <span style="font-size:16px">${st?.icon}</span>
-            <div style="flex:1">
-              <div style="font-size:12px;font-weight:500">${formatFechaLatam(a.fecha)}</div>
-              ${a.hora_clase ? `<div style="font-size:10px;color:var(--txt2)">${a.hora_clase}° hora</div>` : ''}
-            </div>
-            <span style="font-size:11px;color:${st?.color}">${st?.label}</span>
-          </div>`;
-        }).join('')}
+    <div class="sec-lb">Grilla de asistencia</div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <label style="font-size:11px;color:var(--txt2)">Desde</label>
+      <input type="date" id="alumno-asist-desde" value="${desde}" class="sel-estilizado" style="font-size:11px;padding:4px 8px">
+      <label style="font-size:11px;color:var(--txt2)">Hasta</label>
+      <input type="date" id="alumno-asist-hasta" value="${hasta}" class="sel-estilizado" style="font-size:11px;padding:4px 8px">
+      <button class="btn-s" style="font-size:11px" onclick="_filtrarGrillaAlumno()">Filtrar</button>
+    </div>
+    <div id="alumno-grilla-wrap">
+      ${_renderGrillaAlumnoHTML(asists, config, desde, hasta)}
+    </div>`;
+}
+
+function _filtrarGrillaAlumno() {
+  const desde = document.getElementById('alumno-asist-desde')?.value;
+  const hasta = document.getElementById('alumno-asist-hasta')?.value;
+  const wrap  = document.getElementById('alumno-grilla-wrap');
+  if (wrap) wrap.innerHTML = _renderGrillaAlumnoHTML(window._alumnoAsistFull || [], window._alumnoAsistConfig || {}, desde, hasta);
+}
+
+function _renderGrillaAlumnoHTML(asists, config, desde, hasta) {
+  const filtered = asists.filter(a => !a.hora_clase && (!desde || a.fecha >= desde) && (!hasta || a.fecha <= hasta));
+  const fechas   = [...new Set(filtered.map(a => a.fecha))].sort();
+  const asistIdx = {};
+  filtered.forEach(a => { asistIdx[a.fecha] = a.estado; });
+
+  if (!fechas.length) return `<div class="empty-state">Sin registros en el período seleccionado</div>`;
+
+  let totalGrilla = 0;
+  fechas.forEach(f => {
+    const est = asistIdx[f];
+    if (est && (est !== 'justificado' || config.justificadas_cuentan)) totalGrilla += ESTADOS_ASIST[est]?.valor || 0;
+  });
+  const colorT = totalGrilla >= (config.umbral_alerta_2??20) ? 'var(--rojo)' : totalGrilla >= (config.umbral_alerta_1??10) ? 'var(--ambar)' : 'var(--verde)';
+
+  return `
+    <div style="display:flex;align-items:stretch;gap:4px">
+      <button onclick="document.getElementById('gw-al').scrollLeft-=150" style="background:var(--surf2);border:1px solid var(--brd);border-radius:var(--rad);padding:0 10px;cursor:pointer;font-size:18px;flex-shrink:0;color:var(--txt2)">‹</button>
+      <div id="gw-al" style="overflow-x:auto;flex:1">
+        <table class="grilla-asist">
+          <thead>
+            <tr>
+              <th style="text-align:left;min-width:70px;position:sticky;left:0;z-index:2;background:var(--bg)"></th>
+              ${fechas.map(f => { const d = new Date(f+'T12:00:00'); return `<th>${d.getDate()}/${d.getMonth()+1}</th>`; }).join('')}
+              <th style="background:var(--rojo-l);color:var(--rojo)">Faltas</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-size:11px;font-weight:500;white-space:nowrap;position:sticky;left:0;background:var(--bg);box-shadow:2px 0 3px rgba(0,0,0,.06)">Estado</td>
+              ${fechas.map(f => {
+                const est = asistIdx[f];
+                if (!est) return `<td><span class="grilla-nd">—</span></td>`;
+                const st = ESTADOS_ASIST[est];
+                return `<td><span class="grilla-cell" style="background:${st?.bg};color:${st?.color}" title="${st?.label}">${st?.short}</span></td>`;
+              }).join('')}
+              <td style="background:var(--rojo-l)"><span style="font-weight:700;color:${colorT}">${totalGrilla}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button onclick="document.getElementById('gw-al').scrollLeft+=150" style="background:var(--surf2);border:1px solid var(--brd);border-radius:var(--rad);padding:0 10px;cursor:pointer;font-size:18px;flex-shrink:0;color:var(--txt2)">›</button>
+    </div>
+    <div class="asist-leyenda" style="margin-top:10px">
+      ${Object.entries(ESTADOS_ASIST).map(([k,v]) => `
+        <span style="font-size:10px;padding:2px 8px;border-radius:20px;background:${v.bg};color:${v.color}">${v.short}=${v.label}</span>
+      `).join('')}
     </div>`;
 }
 
@@ -1209,6 +1272,21 @@ async function verificarAlertas(alumnoIds, instId, nivel) {
       }
     }
   }
+}
+
+async function _tomarAccionAlerta(alertaId, btn) {
+  if (!confirm('¿Confirmás que se tomó acción sobre esta alerta?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Procesando...';
+  const { error } = await sb.from('alertas_asistencia').delete().eq('id', alertaId);
+  if (error) {
+    btn.disabled = false;
+    btn.textContent = '✓ Acción tomada';
+    alert('Error: ' + error.message);
+    return;
+  }
+  const card = document.getElementById(`alerta-card-${alertaId}`);
+  if (card) card.remove();
 }
 
 // ═══════════════════════════════════════════════════════
