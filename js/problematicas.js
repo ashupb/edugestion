@@ -397,10 +397,6 @@ async function cargarDetProb(probId) {
       ${puedeSeg && !cerrada ? `
       <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
         <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento${esGrupal ? ' grupal' : ''}</div>
-        ${_tiposIntervCache?.length ? `
-        <select id="tipo-seg-${probId}" style="margin-bottom:6px;font-size:12px;padding:5px 8px;border:1.5px solid var(--brd);border-radius:6px;background:var(--surf);width:100%">
-          ${_tiposIntervCache.map(t => `<option value="${t}">${t}</option>`).join('')}
-        </select>` : ''}
         <textarea id="id-${probId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
         <input type="text" id="ip-${probId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
         <div style="margin-top:8px">
@@ -494,10 +490,6 @@ async function abrirDetalleHija(hijaId) {
         ${perm.agregarSeg && !cerrada ? `
         <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
           <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento individual</div>
-          ${_tiposIntervCache?.length ? `
-          <select id="tipo-seg-hija-${hijaId}" style="margin-bottom:6px;font-size:12px;padding:5px 8px;border:1.5px solid var(--brd);border-radius:6px;background:var(--surf);width:100%">
-            ${_tiposIntervCache.map(t => `<option value="${t}">${t}</option>`).join('')}
-          </select>` : ''}
           <textarea id="id-hija-${hijaId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
           <input type="text" id="ip-hija-${hijaId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
           <div style="margin-top:8px">
@@ -530,7 +522,7 @@ async function abrirDetalleHija(hijaId) {
 async function guardarSegHija(hijaId, madreId) {
   const d      = document.getElementById('id-hija-' + hijaId)?.value.trim();
   const p      = document.getElementById('ip-hija-' + hijaId)?.value.trim();
-  const tipo   = document.getElementById('tipo-seg-hija-' + hijaId)?.value || 'otro';
+  const tipo   = 'seguimiento';
   const result = document.querySelector(`input[name="res-hija-${hijaId}"]:checked`)?.value || null;
   if (!d) { alert('Describí la acción tomada.'); return; }
   const { error } = await sb.from('intervenciones').insert({
@@ -574,7 +566,7 @@ async function cerrarHija(hijaId, madreId) {
 async function guardarSeguimiento(probId) {
   const d      = document.getElementById('id-' + probId)?.value.trim();
   const p      = document.getElementById('ip-' + probId)?.value.trim();
-  const tipo   = document.getElementById('tipo-seg-' + probId)?.value || 'otro';
+  const tipo   = 'seguimiento';
   const result = document.querySelector(`input[name="res-${probId}"]:checked`)?.value || null;
   if (!d) { alert('Describí la acción tomada.'); return; }
   const { error } = await sb.from('intervenciones').insert({
