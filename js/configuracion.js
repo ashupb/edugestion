@@ -364,16 +364,14 @@ function _renderUsuariosList() {
       ${puedeCrear ? `<button class="btn-p" onclick="_abrirModalUsuario(null)">+ Nuevo usuario</button>` : ''}
     </div>
 
-    ${!filtrados.length ? `<div class="empty-state">Sin usuarios encontrados</div>` : ''}
-
-    <div class="card" style="padding:0;overflow:hidden">
-      ${filtrados.map(u => {
+    ${(() => {
+      if (!filtrados.length) return '<div class="empty-state">Sin usuarios encontrados</div>';
+      const mkRow = u => {
         const iniciales  = u.avatar_iniciales || generarIniciales(u.nombre_completo || '');
         const rolBadge   = ROL_BADGE_ADM[u.rol] || 'tgr';
         const nivelColor = u.nivel ? NIVEL_COLORS_ADM[u.nivel] : 'var(--gris)';
         const inactivo   = u.activo === false;
-        return `
-          <div class="adm-user-row" onclick="_abrirModalUsuario('${u.id}')">
+        return `<div class="adm-user-row" onclick="_abrirModalUsuario('${u.id}')">
             <div class="av av32" style="background:${nivelColor};color:#fff;flex-shrink:0">${iniciales}</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:12px;font-weight:600;${inactivo ? 'color:var(--txt3);text-decoration:line-through' : ''}">${_esc(u.nombre_completo) || '—'}</div>
@@ -381,12 +379,30 @@ function _renderUsuariosList() {
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0">
               <span class="tag ${rolBadge}">${ROL_LABELS_ADM[u.rol] || u.rol}</span>
-              ${u.nivel ? `<span style="font-size:9px;font-weight:600;color:${nivelColor}">${NIVEL_LABELS_ADM[u.nivel] || u.nivel}</span>` : ''}
-              ${inactivo ? `<span class="tag tr">Inactivo</span>` : ''}
+              ${inactivo ? '<span class="tag tr">Inactivo</span>' : ''}
             </div>
           </div>`;
-      }).join('')}
-    </div>`;
+      };
+      const grupos = [
+        { key: null,         label: 'Institucionales', color: 'var(--txt2)' },
+        { key: 'inicial',    label: 'Inicial',         color: NIVEL_COLORS_ADM.inicial },
+        { key: 'primario',   label: 'Primario',        color: NIVEL_COLORS_ADM.primario },
+        { key: 'secundario', label: 'Secundario',      color: NIVEL_COLORS_ADM.secundario },
+      ];
+      return grupos.map(g => {
+        const users = filtrados.filter(u => (u.nivel || null) === g.key);
+        if (!users.length) return '';
+        return `<div style="margin-bottom:16px">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+              color:${g.color};margin-bottom:6px;padding-bottom:4px;border-bottom:2px solid ${g.color}">
+              ${g.label}
+            </div>
+            <div class="card" style="padding:0;overflow:hidden">
+              ${users.map(mkRow).join('')}
+            </div>
+          </div>`;
+      }).join('');
+    })()}`;
 }
 
 async function _abrirModalUsuario(userId) {
@@ -449,9 +465,10 @@ async function _abrirModalUsuario(userId) {
       <div style="font-size:10px;color:var(--txt2);margin-top:3px">Si completás este campo se actualizará la contraseña y el DNI registrado.</div>
     </div>`}
     <div class="adm-form-row">
-      <label class="adm-label">Email (para recuperación de contraseña)</label>
+      <label class="adm-label">Email</label>
       <input type="email" id="mu-email" value="${_esc(user?.email)}" placeholder="email@ejemplo.com"
         ${!esNuevo ? 'readonly style="opacity:.6;cursor:default"' : ''}>
+      <div style="font-size:10px;color:var(--txt2);margin-top:3px">Solo informativo.</div>
     </div>
     <div class="adm-form-row">
       <label class="adm-label">Rol</label>
@@ -649,6 +666,9 @@ async function _guardarUsuario(userId, esNuevo) {
           },
           body: JSON.stringify({ cursos_ids }),
         });
+        if (rol === 'preceptor') {
+          await sb.from('cursos').update({ preceptor_id: authData.id }).in('id', cursos_ids);
+        }
       }
     } else {
       const updatePayload = {
@@ -663,6 +683,15 @@ async function _guardarUsuario(userId, esNuevo) {
       }
       const { error } = await sb.from('usuarios').update(updatePayload).eq('id', userId);
       if (error) throw error;
+      if (rol === 'preceptor') {
+        await sb.from('cursos')
+          .update({ preceptor_id: null })
+          .eq('preceptor_id', userId)
+          .eq('institucion_id', USUARIO_ACTUAL.institucion_id);
+        if (cursos_ids.length) {
+          await sb.from('cursos').update({ preceptor_id: userId }).in('id', cursos_ids);
+        }
+      }
       if (passField) {
         const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
           method: 'PUT',

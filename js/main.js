@@ -163,16 +163,51 @@ function hoyISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+function getFeriadosAR(anio) {
+  const _iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const map = new Map();
+  const a=anio%19, b=Math.floor(anio/100), c=anio%100, d=Math.floor(b/4), e=b%4;
+  const f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3);
+  const h=(19*a+b-d-g+15)%30, ii=Math.floor(c/4), k=c%4;
+  const l=(32+2*e+2*ii-h-k)%7, m=Math.floor((a+11*h+22*l)/451);
+  const pm=Math.floor((h+l-7*m+114)/31), pd=((h+l-7*m+114)%31)+1;
+  const pascua = new Date(anio, pm-1, pd);
+  const dp = (off, nom) => { const x=new Date(pascua); x.setDate(x.getDate()+off); map.set(_iso(x), nom); };
+  dp(-48,'Carnaval'); dp(-47,'Carnaval'); dp(-2,'Viernes Santo');
+  const af = (mes, dia, nom) => map.set(_iso(new Date(anio, mes-1, dia)), nom);
+  af(1,1,'Año Nuevo'); af(3,24,'Día de la Memoria por la Verdad y la Justicia');
+  af(4,2,'Día del Veterano y de los Caídos en Malvinas'); af(5,1,'Día del Trabajador');
+  af(5,25,'Revolución de Mayo'); af(6,20,'Paso a la Inmortalidad del Gral. Belgrano');
+  af(7,9,'Día de la Independencia'); af(12,8,'Inmaculada Concepción'); af(12,25,'Navidad');
+  const tsl = (mes, dia, nom) => {
+    const dt = new Date(anio, mes-1, dia);
+    dt.setDate(dt.getDate() + [1,0,-1,-2,4,3,2][dt.getDay()]);
+    map.set(_iso(dt), nom);
+  };
+  tsl(8,17,'Paso a la Inmortalidad del Gral. San Martín');
+  tsl(10,12,'Día del Respeto a la Diversidad Cultural');
+  tsl(11,20,'Día de la Soberanía Nacional');
+  return map;
+}
 function diaHabilMasReciente(iso) {
   const d = new Date(iso + 'T12:00:00');
-  const dia = d.getDay();
-  if (dia === 0) d.setDate(d.getDate() - 2);      // domingo → viernes
-  else if (dia === 6) d.setDate(d.getDate() - 1); // sábado → viernes
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  for (let i = 0; i < 20; i++) {
+    const check = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (esFechaHabil(check)) return check;
+    d.setDate(d.getDate() - 1);
+  }
+  return iso;
 }
 function esFechaHabil(iso) {
-  const dia = new Date(iso + 'T12:00:00').getDay();
-  return dia >= 1 && dia <= 5;
+  const d = new Date(iso + 'T12:00:00');
+  const dia = d.getDay();
+  if (dia === 0 || dia === 6) return false;
+  const anio = d.getFullYear();
+  if (!window._feriadosARCache) window._feriadosARCache = {};
+  if (!window._feriadosARCache[anio]) window._feriadosARCache[anio] = getFeriadosAR(anio);
+  if (window._feriadosARCache[anio].has(iso)) return false;
+  if (window._diasNoLectivos?.has(iso)) return false;
+  return true;
 }
 function formatFecha(iso) {
   if (!iso) return '—';
@@ -364,7 +399,7 @@ function validarFechaHabilCustom(id) {
     return;
   }
   if (!esFechaHabil(iso)) {
-    alert('Por favor seleccioná un día hábil (lunes a viernes).');
+    alert('Por favor seleccioná un día hábil (sin fines de semana, feriados ni días sin clases).');
     _resetFechaInput(id, diaHabilMasReciente(iso));
   }
 }

@@ -183,10 +183,15 @@ async function _rAgendaSemana(c, instId, puedeCrear, hoy, filtroTabsHTML, vistaT
     const esSel = iso === AGENDA_DIA_SEL;
     const esHoy = iso === hoy;
     const tieneEvs = _agendaEventosSem.some(e => iso >= e.fecha_inicio && iso <= (e.fecha_fin || e.fecha_inicio));
-    return `<button class="dia-tab${esSel ? ' on' : ''}${esHoy ? ' hoy' : ''}" onclick="selDia('${iso}')">
+    const anioTab = d.getFullYear();
+    if (!window._feriadosARCache) window._feriadosARCache = {};
+    if (!window._feriadosARCache[anioTab]) window._feriadosARCache[anioTab] = getFeriadosAR(anioTab);
+    const feriadoNom = window._feriadosARCache[anioTab]?.get(iso);
+    return `<button class="dia-tab${esSel ? ' on' : ''}${esHoy ? ' hoy' : ''}" onclick="selDia('${iso}')"
+      ${feriadoNom ? `title="${feriadoNom}"` : ''}>
       <span class="dia-lbl">${lbl}</span>
       <span class="dia-num">${d.getDate()}</span>
-      ${tieneEvs ? '<span class="dia-dot"></span>' : ''}
+      ${feriadoNom ? '<span class="dia-dot" style="background:#f9a825"></span>' : tieneEvs ? '<span class="dia-dot"></span>' : ''}
     </button>`;
   }).join('');
 
@@ -297,13 +302,20 @@ function buildCalGrid(eventos, primerDia, ultimoDia) {
 
   for (let i = 0; i < inicioSemana; i++) html += `<div class="cal-cell-ag empty"></div>`;
 
+  if (!window._feriadosARCache) window._feriadosARCache = {};
+  if (!window._feriadosARCache[AGENDA_ANIO]) window._feriadosARCache[AGENDA_ANIO] = getFeriadosAR(AGENDA_ANIO);
+  const _ferMes = window._feriadosARCache[AGENDA_ANIO];
+
   for (let dia = 1; dia <= totalDias; dia++) {
     const fechaStr = isoFecha(AGENDA_ANIO, AGENDA_MES + 1, dia);
     const esHoy = fechaStr === _hoyStr;
     const evs   = evPorDia[fechaStr] || [];
+    const ferNom = _ferMes?.get(fechaStr);
+    const maxEvs = ferNom ? 2 : 3;
     html += `<div class="cal-cell-ag${esHoy?' hoy':''}">
       <div class="cal-dia-num-ag${esHoy?' hoy':''}">${dia}</div>
-      ${evs.slice(0,3).map(e => {
+      ${ferNom ? `<div class="cal-ev-chip-ag" style="background:#fff8e1;color:#b8740a;border-left:3px solid #f9a825;cursor:default" title="${ferNom}">🇦🇷 ${ferNom.length>14?ferNom.slice(0,14)+'…':ferNom}</div>` : ''}
+      ${evs.slice(0,maxEvs).map(e => {
         const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
         return `<div class="cal-ev-chip-ag"
           style="background:${nc.bg};color:${nc.color};border-left:3px solid ${nc.color}"
@@ -312,7 +324,7 @@ function buildCalGrid(eventos, primerDia, ultimoDia) {
           ${e.hora?`<span style="opacity:.7;margin-right:2px">${e.hora.slice(0,5)}</span>`:''}${e.nombre.length>18?e.nombre.slice(0,18)+'…':e.nombre}
         </div>`;
       }).join('')}
-      ${evs.length>3?`<div style="font-size:9px;color:var(--txt3);padding:1px 4px">+${evs.length-3} más</div>`:''}
+      ${evs.length>maxEvs?`<div style="font-size:9px;color:var(--txt3);padding:1px 4px">+${evs.length-maxEvs} más</div>`:''}
     </div>`;
   }
 
@@ -326,15 +338,31 @@ function _renderEventosDia(eventos) {
   const c = document.getElementById('agenda-lista-dia');
   if (!c) return;
 
+  const diaISO = AGENDA_DIA_SEL;
+  const anio = diaISO ? parseInt(diaISO) : new Date().getFullYear();
+  if (!window._feriadosARCache) window._feriadosARCache = {};
+  if (!window._feriadosARCache[anio]) window._feriadosARCache[anio] = getFeriadosAR(anio);
+  const feriadoNom = window._feriadosARCache[anio]?.get(diaISO);
+
+  const feriadoBanner = feriadoNom ? `
+    <div class="agenda-item" style="background:#fff8e1;border-left:4px solid #f9a825;cursor:default">
+      <div class="agenda-hora">🇦🇷</div>
+      <div class="agenda-barra" style="background:#f9a825"></div>
+      <div class="agenda-info">
+        <div class="agenda-titulo">Feriado Nacional</div>
+        <div class="agenda-meta"><span>${feriadoNom}</span></div>
+      </div>
+    </div>` : '';
+
   if (!eventos.length) {
-    c.innerHTML = `<div class="empty-state" style="padding:28px 0">
+    c.innerHTML = feriadoBanner || `<div class="empty-state" style="padding:28px 0">
       <span style="font-size:28px">📭</span>
       <div>Sin eventos este día</div>
     </div>`;
     return;
   }
 
-  c.innerHTML = eventos.map(e => {
+  c.innerHTML = feriadoBanner + eventos.map(e => {
     const nc   = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
     const tipo = TIPOS_EVENTO.find(t => t.id === e.tipo_id);
     return `<div class="agenda-item" onclick="verEvento('${e.id}')">

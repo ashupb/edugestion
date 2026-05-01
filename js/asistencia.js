@@ -10,7 +10,7 @@ function validarFechaHabilInput(inputEl) {
   const val = inputEl.value;
   if (!val) return;
   if (!esFechaHabil(val)) {
-    alert('No se toma asistencia los sábados ni domingos. Se seleccionó el viernes anterior.');
+    alert('No se toma asistencia los fines de semana, feriados ni días sin clases. Se seleccionó el día hábil anterior.');
     inputEl.value = diaHabilMasReciente(val);
   }
 }
@@ -33,13 +33,16 @@ async function rAsist() {
   const instId = USUARIO_ACTUAL.institucion_id;
   const rol    = USUARIO_ACTUAL.rol;
 
-  const [configRes, justRes] = await Promise.all([
+  const [configRes, justRes, noLectRes] = await Promise.all([
     sb.from('config_asistencia').select('*').eq('institucion_id', instId),
     sb.from('tipos_justificacion').select('*').eq('institucion_id', instId).eq('activo', true),
+    sb.from('dias_no_lectivos').select('id,fecha,motivo').eq('institucion_id', instId).order('fecha'),
   ]);
   TIPOS_JUST   = justRes.data || [];
   CONFIG_ASIST = {};
   (configRes.data || []).forEach(c => CONFIG_ASIST[c.nivel] = c);
+  window._diasNoLectivos     = new Set((noLectRes.data || []).map(r => r.fecha));
+  window._diasNoLectivosData = noLectRes.data || [];
 
   if (rol === 'director_general' || rol === 'directivo_nivel') await rAsistDirector();
   else if (rol === 'docente')   await rAsistDocente();
@@ -138,6 +141,7 @@ async function rAsistDirector() {
       <span style="font-size:18px">✓</span>
       <span style="font-size:12px;color:var(--verde);font-weight:600">Todos los preceptores están al día</span>
     </div>`}
+    ${['director_general','directivo_nivel'].includes(USUARIO_ACTUAL.rol) ? `<div id="dnl-seccion">${_renderDNLSeccion()}</div>` : ''}
     ${niveles.map(n => {
       const cs = cursos.filter(cu => cu.nivel === n);
       if (!cs.length) return '';
@@ -1115,7 +1119,7 @@ async function verAlumnoAsist(alumnoId) {
 
   let totalFaltas = 0;
   const conteo = {};
-  asists.forEach(a => {
+  asists.filter(a => !a.hora_clase).forEach(a => {
     conteo[a.estado] = (conteo[a.estado]||0) + 1;
     if (a.estado !== 'justificado' || config.justificadas_cuentan) {
       totalFaltas += ESTADOS_ASIST[a.estado]?.valor || 0;
@@ -1144,7 +1148,7 @@ async function verAlumnoAsist(alumnoId) {
     ${alertas.length ? `
     <div class="alr" style="margin-bottom:12px">
       <div class="alr-t">${['','⚠️ Primer aviso','⚠️ Segundo aviso','🔴 Tercer aviso','🚨 Riesgo de regularidad'][alertas[0].tipo_alerta]}</div>
-      <div class="alr-d">Total computado: ${alertas[0].total_faltas} faltas</div>
+      <div class="alr-d">Total computado: ${totalFaltas} faltas</div>
     </div>` : ''}
 
     <div class="card" style="margin-bottom:12px">
@@ -1287,6 +1291,75 @@ async function _tomarAccionAlerta(alertaId, btn) {
   }
   const card = document.getElementById(`alerta-card-${alertaId}`);
   if (card) card.remove();
+}
+
+// ─── DÍAS NO LECTIVOS ─────────────────────────────────
+function _renderDNLSeccion() {
+  const data = window._diasNoLectivosData || [];
+  return `
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${data.length?'10':'0'}px">
+        <div class="sec-lb" style="margin:0">🏫 Días sin clases</div>
+        <button class="btn-s" style="font-size:11px" onclick="_abrirAddDNL()">+ Agregar</button>
+      </div>
+      <div id="dnl-add-form"></div>
+      ${data.length ? `
+        <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">
+          ${data.map(d => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surf2);border-radius:var(--rad)">
+              <div>
+                <span style="font-size:12px;font-weight:600">${formatFechaLatam(d.fecha)}</span>
+                ${d.motivo ? `<span style="font-size:11px;color:var(--txt2);margin-left:8px">${_esc(d.motivo)}</span>` : ''}
+              </div>
+              <button onclick="_delDiaNoLect('${d.id}','${d.fecha}')" style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:18px;padding:0 4px" title="Eliminar">×</button>
+            </div>`).join('')}
+        </div>` : `<p style="font-size:11px;color:var(--txt3);margin:6px 0 0">Sin días registrados.</p>`}
+    </div>`;
+}
+
+function _abrirAddDNL() {
+  const form = document.getElementById('dnl-add-form');
+  if (!form) return;
+  form.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:8px;padding:8px;background:var(--surf2);border-radius:var(--rad)">
+      <div>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:2px">Fecha</div>
+        <input type="date" id="dnl-fecha" class="inp-base" style="font-size:12px;padding:5px 8px">
+      </div>
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:2px">Motivo (opcional)</div>
+        <input type="text" id="dnl-motivo" class="inp-base" placeholder="Ej: Paro docente" style="font-size:12px;padding:5px 8px;width:100%;box-sizing:border-box">
+      </div>
+      <div style="display:flex;gap:4px">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarDiaNoLect()">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('dnl-add-form').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarDiaNoLect() {
+  const fecha  = document.getElementById('dnl-fecha')?.value;
+  const motivo = document.getElementById('dnl-motivo')?.value?.trim() || null;
+  if (!fecha) { alert('Seleccioná una fecha.'); return; }
+  const instId = USUARIO_ACTUAL.institucion_id;
+  const { error } = await sb.from('dias_no_lectivos')
+    .upsert({ institucion_id: instId, fecha, motivo }, { onConflict: 'institucion_id,fecha' });
+  if (error) { alert('Error al guardar: ' + error.message); return; }
+  const { data } = await sb.from('dias_no_lectivos').select('id,fecha,motivo').eq('institucion_id', instId).order('fecha');
+  window._diasNoLectivos     = new Set((data || []).map(r => r.fecha));
+  window._diasNoLectivosData = data || [];
+  const sec = document.getElementById('dnl-seccion');
+  if (sec) sec.innerHTML = _renderDNLSeccion();
+}
+
+async function _delDiaNoLect(id, fecha) {
+  if (!confirm(`¿Eliminar el día ${formatFechaLatam(fecha)} de días sin clases?`)) return;
+  const { error } = await sb.from('dias_no_lectivos').delete().eq('id', id);
+  if (error) { alert('Error al eliminar: ' + error.message); return; }
+  window._diasNoLectivos?.delete(fecha);
+  window._diasNoLectivosData = (window._diasNoLectivosData || []).filter(d => d.id !== id);
+  const sec = document.getElementById('dnl-seccion');
+  if (sec) sec.innerHTML = _renderDNLSeccion();
 }
 
 // ═══════════════════════════════════════════════════════

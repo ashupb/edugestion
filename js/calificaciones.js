@@ -53,9 +53,10 @@ const NOTA_CLS = (n, nivel, nombreCurso) => {
 
 // ─── HELPERS GLOBALES ─────────────────────────────────
 function renderSituacionCard(alumnos, getPromedio, prefijo, titulo, notaMin = 7, notaRec = 4) {
-  const criticos    = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p < notaRec; });
-  const observacion = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= notaRec && p < notaMin; });
-  const aprobados   = alumnos.filter(al => { const p = getPromedio(al); return p !== null && p >= notaMin; });
+  const _rp = al => _redondearProm(getPromedio(al));
+  const criticos    = alumnos.filter(al => { const p = _rp(al); return p !== null && p < notaRec; });
+  const observacion = alumnos.filter(al => { const p = _rp(al); return p !== null && p >= notaRec && p < notaMin; });
+  const aprobados   = alumnos.filter(al => { const p = _rp(al); return p !== null && p >= notaMin; });
   const sinNotas    = alumnos.filter(al => getPromedio(al) === null);
 
   const listaHTML = (lista, color) => lista.map(al => `
@@ -64,7 +65,7 @@ function renderSituacionCard(alumnos, getPromedio, prefijo, titulo, notaMin = 7,
         <div style="font-size:12px;font-weight:500">${al.apellido}, ${al.nombre}</div>
         ${al.cursoNombre ? `<div style="font-size:10px;color:var(--txt2)">${al.cursoNombre}</div>` : ''}
       </div>
-      <span style="font-size:13px;font-weight:700;color:${color}">${(getPromedio(al) ?? 0).toFixed(1)}</span>
+      <span style="font-size:13px;font-weight:700;color:${color}">${_rp(al) ?? 0}</span>
     </div>`).join('');
 
   return `
@@ -135,6 +136,8 @@ function _mkMiniStat(apr, obs, crit, sin) {
   </div>`;
 }
 
+function _redondearProm(v) { return v === null || v === undefined ? null : Math.round(v); }
+
 function _scrollGrilla(dir) {
   const el = document.getElementById('grilla-notas-wrap');
   if (el) el.scrollBy({ left: dir * 160, behavior: 'smooth' });
@@ -156,11 +159,8 @@ async function rNotas() {
   CONFIG_NOTAS = {};
   (cfgNotasRes.data || []).forEach(c => CONFIG_NOTAS[c.nivel] = c);
 
-  if (rol === 'docente')                                              await rNotasDocente();
-  else if (rol === 'director_general' || rol === 'directivo_nivel')  await rNotasDirectivo();
-  else if (rol === 'preceptor')                                       await rNotasDirectivo();
-  else if (rol === 'eoe')                                             await rNotasEOE();
-  else await rNotasDirectivo();
+  if (rol === 'docente') await rNotasDocente();
+  else                   await rNotasDirectivo();
 
   inyectarEstilosNotas();
 }
@@ -343,14 +343,14 @@ async function _cargarSituacionDocenteGlobal(cursoMap) {
   const cursoStatsDo = {};
   alumnos.forEach(al => {
     if (!cursoStatsDo[al.curso_id]) cursoStatsDo[al.curso_id] = { apr: 0, obs: 0, crit: 0, sin: 0 };
-    const prom = getPromedio(al);
-    const cu   = cursoMap[al.curso_id];
-    const min  = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
-    const rec  = CONFIG_NOTAS[cu?.nivel]?.nota_recuperacion ?? 4;
-    const st   = cursoStatsDo[al.curso_id];
-    if (prom === null) st.sin++;
-    else if (prom >= min) st.apr++;
-    else if (prom >= rec) st.obs++;
+    const promR = _redondearProm(getPromedio(al));
+    const cu    = cursoMap[al.curso_id];
+    const min   = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
+    const rec   = CONFIG_NOTAS[cu?.nivel]?.nota_recuperacion ?? 4;
+    const st    = cursoStatsDo[al.curso_id];
+    if (promR === null) st.sin++;
+    else if (promR >= min) st.apr++;
+    else if (promR >= rec) st.obs++;
     else st.crit++;
   });
   Object.entries(cursoStatsDo).forEach(([cId, st]) => {
@@ -537,7 +537,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
                     }).join('')}
                     <td>
                       ${prom !== null
-                        ? `<span style="font-weight:700;color:${NOTA_COLOR(prom, nivel, nombreCurso)}">${prom.toFixed(1)}</span>`
+                        ? `<span style="font-weight:700;color:${NOTA_COLOR(Math.round(prom), nivel, nombreCurso)}">${Math.round(prom)}</span>`
                         : `<span style="color:var(--txt3)">—</span>`}
                     </td>
                   </tr>`;
@@ -1150,14 +1150,14 @@ async function _cargarSituacionDirectivoGlobal(cursos) {
   const cursoStats = {};
   alumnos.forEach(al => {
     if (!cursoStats[al.curso_id]) cursoStats[al.curso_id] = { apr: 0, obs: 0, crit: 0, sin: 0 };
-    const prom = getPromedio(al);
-    const cu   = cursos.find(c => c.id === al.curso_id);
-    const min  = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
-    const rec  = CONFIG_NOTAS[cu?.nivel]?.nota_recuperacion ?? 4;
-    const st   = cursoStats[al.curso_id];
-    if (prom === null) st.sin++;
-    else if (prom >= min) st.apr++;
-    else if (prom >= rec) st.obs++;
+    const promR = _redondearProm(getPromedio(al));
+    const cu    = cursos.find(c => c.id === al.curso_id);
+    const min   = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
+    const rec   = CONFIG_NOTAS[cu?.nivel]?.nota_recuperacion ?? 4;
+    const st    = cursoStats[al.curso_id];
+    if (promR === null) st.sin++;
+    else if (promR >= min) st.apr++;
+    else if (promR >= rec) st.obs++;
     else st.crit++;
   });
   Object.entries(cursoStats).forEach(([cId, st]) => {
@@ -1300,8 +1300,8 @@ async function verCalifCurso(cursoId, nivel) {
                       <td>
                         <span style="display:inline-block;min-width:28px;padding:2px 4px;border-radius:5px;
                           font-size:11px;font-weight:700;text-align:center;
-                          background:${NOTA_BG(prom)};color:${NOTA_COLOR(prom)}">
-                          ${prom.toFixed(1)}
+                          background:${NOTA_BG(Math.round(prom))};color:${NOTA_COLOR(Math.round(prom))}">
+                          ${Math.round(prom)}
                         </span>
                       </td>`;
                   }).join('')}
@@ -1422,7 +1422,7 @@ async function verAlumnoNotas(alumnoId, cursoId, materiaId, periodoId) {
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <div style="font-size:13px;font-weight:700">${materia}</div>
                 ${prom !== null
-                  ? `<span style="font-size:18px;font-weight:700;color:${NOTA_COLOR(prom)}">${prom.toFixed(1)}</span>`
+                  ? `<span style="font-size:18px;font-weight:700;color:${NOTA_COLOR(Math.round(prom))}">${Math.round(prom)}</span>`
                   : '<span style="color:var(--txt3);font-size:12px">Sin promedio</span>'}
               </div>
               ${notas.map(n => {
@@ -1468,7 +1468,7 @@ async function verificarAlertasAcademicas(alumnoId, cursoId, materiaId, periodoI
     await insertAlertaAcad(instId, alumnoId, cursoId, materiaId, 'nota_baja', `Nota: ${ultNota}`);
   }
   if (prom !== null && prom < notaMin) {
-    await insertAlertaAcad(instId, alumnoId, cursoId, materiaId, 'promedio_bajo', `Promedio: ${prom.toFixed(1)}`);
+    await insertAlertaAcad(instId, alumnoId, cursoId, materiaId, 'promedio_bajo', `Promedio: ${Math.round(prom)}`);
   }
 
   const { data: todasCalifs } = await sb.from('calificaciones')
@@ -1694,7 +1694,7 @@ async function verNotasPrimariaGrado(cursoId, nivel, nombreCurso, editable = tru
                 ? (usaConc ? promRow.promedio_concepto_manual : promRow.promedio_manual)
                 : promCalc;
               const promTxt     = promFinal !== null && promFinal !== undefined
-                ? (typeof promFinal === 'number' ? promFinal.toFixed(1) : String(promFinal))
+                ? (typeof promFinal === 'number' ? String(Math.round(promFinal)) : String(promFinal))
                 : null;
 
               return `
