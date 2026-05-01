@@ -123,7 +123,7 @@ async function rProb() {
       }
       lista = lista.filter(p => !p.confidencial || p.responsable_id === USUARIO_ACTUAL.id);
     }
-    if (USUARIO_ACTUAL.rol === 'directivo_nivel' && USUARIO_ACTUAL.nivel) {
+    if (USUARIO_ACTUAL.rol === 'directivo_nivel' && USUARIO_ACTUAL.nivel && _probFiltros.nivel === 'todos') {
       lista = lista.filter(p => {
         const mod = p.modalidad || 'individual';
         if (mod === 'grupal' || mod === 'curso') return p.nivel === USUARIO_ACTUAL.nivel;
@@ -131,6 +131,19 @@ async function rProb() {
       });
     }
     window._probCache = lista;
+
+    // Calcular días sin intervención para casos activos
+    const _activosIds = lista.filter(p => p.estado === 'abierta' || p.estado === 'en_seguimiento').map(p => p.id);
+    window._probLastInterv = {};
+    if (_activosIds.length) {
+      const { data: _lastInts } = await sb.from('intervenciones')
+        .select('problematica_id,created_at')
+        .in('problematica_id', _activosIds)
+        .order('created_at', { ascending: false });
+      (_lastInts || []).forEach(iv => {
+        if (!window._probLastInterv[iv.problematica_id]) window._probLastInterv[iv.problematica_id] = iv.created_at;
+      });
+    }
 
     const abiertas = lista.filter(p => p.estado === 'abierta').length;
     const enSeg    = lista.filter(p => p.estado === 'en_seguimiento').length;
@@ -154,6 +167,16 @@ async function rProb() {
       <div id="prob-lista" style="margin-top:10px">${renderListaProb(lista)}</div>
       <div id="form-prob"></div>`;
 
+    if (window._probPendienteAbrir) {
+      const _pid = window._probPendienteAbrir;
+      window._probPendienteAbrir = null;
+      setTimeout(() => {
+        togProb('pr-' + _pid);
+        setTimeout(() => document.getElementById('det-' + _pid)?.scrollIntoView({ behavior:'smooth', block:'start' }), 400);
+      }, 100);
+    }
+
+    checkAlertasProb(USUARIO_ACTUAL.institucion_id).catch(() => {});
   } catch(e) { showError('prob', 'Error: ' + e.message); }
 }
 
@@ -179,7 +202,7 @@ function renderFiltrosProb() {
         ${chip('urgencia','media','Media', 'color:var(--ambar);border-color:rgba(214,137,16,.3);background:var(--amb-l)')}
         ${chip('urgencia','baja','Baja',   'color:var(--verde);border-color:rgba(26,74,46,.3);background:var(--verde-l)')}
       </div>
-      ${(_probMigracionOk === true && !['directivo_nivel','preceptor'].includes(USUARIO_ACTUAL.rol)) ? `<div class="chip-row">
+      ${(_probMigracionOk === true && USUARIO_ACTUAL.rol !== 'preceptor') ? `<div class="chip-row">
         ${chip('nivel','todos','Todos los niveles')}
         ${chip('nivel','inicial','Inicial')}
         ${chip('nivel','primario','Primario')}
@@ -225,6 +248,16 @@ function renderListaProb(lista) {
     const avBg   = esGrupal ? 'var(--azul-l)' : 'var(--rojo-l)';
     const avCl   = esGrupal ? 'var(--azul)'   : 'var(--rojo)';
 
+    let actIndicador = '';
+    if (p.estado === 'abierta' || p.estado === 'en_seguimiento') {
+      const lastF = window._probLastInterv?.[p.id];
+      const base  = lastF ? new Date(lastF) : new Date(p.created_at);
+      const dias  = Math.floor((Date.now() - base.getTime()) / 86400000);
+      const col   = dias <= 7 ? 'var(--verde)' : dias <= 14 ? 'var(--ambar)' : 'var(--rojo)';
+      const tip   = dias <= 7 ? 'Actividad reciente' : `Sin actividad hace ${dias} día${dias !== 1 ? 's' : ''}`;
+      actIndicador = `<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;color:${col};font-weight:600"><span style="width:6px;height:6px;border-radius:50%;background:${col};display:inline-block;flex-shrink:0"></span>${tip}</span>`;
+    }
+
     return `
       <div class="caso-c ${urgCls}">
         <div class="caso-top" onclick="togProb('pr-${p.id}')">
@@ -238,6 +271,7 @@ function renderListaProb(lista) {
               <span class="tag ${estCls}">${estLbl}</span>
               ${esGrupal ? `<span class="tag td">${modalidad === 'curso' ? 'Curso' : 'Grupal'}</span>` : ''}
               ${p.confidencial ? '<span class="tag td">Confidencial</span>' : ''}
+              ${actIndicador}
             </div>
           </div>
           <span style="font-size:11px;color:var(--txt2)">${open ? '▲' : '▼'}</span>
@@ -311,6 +345,12 @@ async function cargarDetProb(probId) {
   const puedeSeg = puedeAgregarSeg(prob);
   const cerrada  = prob?.estado === 'cerrada' || prob?.estado === 'derivada';
 
+  let cerradorNombre = null;
+  if (cerrada && prob?.cerrado_por) {
+    const { data: cerrador } = await sb.from('usuarios').select('nombre_completo').eq('id', prob.cerrado_por).single();
+    cerradorNombre = cerrador?.nombre_completo || null;
+  }
+
   const dotColor  = t => t === 'Caso cerrado' ? 'var(--verde)' : t === 'Caso reabierto' ? 'var(--ambar)' : 'var(--azul)';
   const resultTag = r => r === 'mejoro'      ? '<span style="font-size:9px;color:var(--verde);font-weight:600;margin-top:2px;display:block">🟢 Mejoró</span>'
     : r === 'sin_cambios' ? '<span style="font-size:9px;color:var(--ambar);font-weight:600;margin-top:2px;display:block">🟡 Sin cambios</span>'
@@ -332,13 +372,27 @@ async function cargarDetProb(probId) {
 
   det.innerHTML = `
     <div style="padding:12px 14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;padding:8px 10px;background:var(--surf2);border-radius:var(--rad)">
+        <div>
+          <span style="font-size:10px;color:var(--txt3);display:block;margin-bottom:1px">Responsable</span>
+          <span style="font-size:11px;font-weight:600">${prob?.responsable?.nombre_completo || 'Sin asignar'}</span>
+        </div>
+        ${['director_general','directivo_nivel','eoe'].includes(USUARIO_ACTUAL.rol) && !cerrada ?
+          `<button class="btn-s" style="font-size:10px;padding:3px 8px;flex-shrink:0" onclick="mostrarReasignarResp('${probId}')">Reasignar</button>` : ''}
+      </div>
+      <div id="form-reasignar-${probId}"></div>
       ${prob?.descripcion ? `<div style="font-size:11px;color:var(--txt2);line-height:1.5;padding:8px 10px;background:var(--surf);border-radius:var(--rad);margin-bottom:10px">${prob.descripcion}</div>` : ''}
-      ${cerrada && prob?.motivo_cierre ? `<div style="background:var(--verde-l);border-radius:var(--rad);padding:8px 10px;margin-bottom:10px;font-size:11px"><span style="font-weight:600;color:var(--verde)">Cerrada</span> · ${prob.motivo_cierre}${prob.cerrado_at ? ' · ' + formatFechaLatam(prob.cerrado_at.split('T')[0]) : ''}</div>` : ''}
 
       ${hijasHTML}
 
       <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora${esGrupal ? ' grupal' : ' de seguimiento'}</div>
       ${invsHTML}
+      ${cerrada ? `
+      <div style="margin-top:12px;padding:10px 12px;background:var(--verde-l);border:1px solid rgba(39,174,96,.2);border-radius:var(--rad)">
+        <div style="font-size:10px;font-weight:700;color:var(--verde);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Caso cerrado</div>
+        ${prob.motivo_cierre ? `<div style="font-size:11px;font-weight:600;color:var(--txt);margin-bottom:3px">${prob.motivo_cierre}</div>` : ''}
+        <div style="font-size:10px;color:var(--txt2)">${cerradorNombre ? `Cerrado por ${cerradorNombre}` : ''}${prob.cerrado_at ? (cerradorNombre ? ' · ' : '') + formatFechaLatam(prob.cerrado_at.split('T')[0]) : ''}</div>
+      </div>` : ''}
 
       ${puedeSeg && !cerrada ? `
       <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
@@ -584,6 +638,56 @@ async function confirmarCierreProb(probId) {
   await rProb();
 }
 
+// ─── REASIGNAR RESPONSABLE ────────────────────────────
+async function mostrarReasignarResp(probId) {
+  const el = document.getElementById('form-reasignar-' + probId);
+  if (!el) return;
+  if (el.innerHTML) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="loading-state small"><div class="spinner"></div></div>';
+  const { data: usuarios } = await sb.from('usuarios')
+    .select('id,nombre_completo,rol')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('activo', true)
+    .in('rol', ['eoe','preceptor','director_general','directivo_nivel'])
+    .order('nombre_completo');
+  const opts = (usuarios || []).map(u =>
+    `<option value="${u.id}">${u.nombre_completo} (${labelRol(u.rol)})</option>`
+  ).join('');
+  el.innerHTML = `
+    <div style="margin-bottom:10px;padding:10px 12px;background:var(--surf2);border-radius:var(--rad);border:1px solid var(--brd)">
+      <div style="font-size:11px;font-weight:600;margin-bottom:6px">Reasignar responsable</div>
+      <select id="sel-reasig-${probId}" style="width:100%;margin-bottom:8px;font-size:12px;padding:5px 8px;border:1.5px solid var(--brd);border-radius:6px;background:var(--surf)">
+        <option value="">— Seleccioná nuevo responsable —</option>
+        ${opts}
+      </select>
+      <div class="acc" style="gap:6px">
+        <button class="btn-p" style="font-size:10px" onclick="confirmarReasignacion('${probId}')">Confirmar</button>
+        <button class="btn-s" style="font-size:10px" onclick="document.getElementById('form-reasignar-${probId}').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function confirmarReasignacion(probId) {
+  const nuevoId = document.getElementById('sel-reasig-' + probId)?.value;
+  if (!nuevoId) { alert('Seleccioná un responsable.'); return; }
+  const prob = (window._probCache || []).find(p => p.id === probId);
+  const nombreAnterior = prob?.responsable?.nombre_completo || 'Sin asignar';
+  const { data: nuevoU } = await sb.from('usuarios').select('nombre_completo').eq('id', nuevoId).single();
+  const nombreNuevo = nuevoU?.nombre_completo || '—';
+  const { error } = await sb.from('problematicas')
+    .update({ responsable_id: nuevoId, updated_at: new Date().toISOString() })
+    .eq('id', probId);
+  if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Reasignación de responsable',
+    descripcion:     `Responsable cambiado de ${nombreAnterior} a ${nombreNuevo}.`,
+    tipo:            'otro',
+  });
+  await rProb();
+}
+
 // ─── REABRIR ──────────────────────────────────────────
 async function reabrirProb(probId) {
   const migOk = await detectarMigracion();
@@ -656,6 +760,7 @@ async function mostrarFormProb() {
           <div style="padding:10px 12px;font-size:11px;color:var(--txt3)">Seleccioná un curso primero</div>
         </div>
         <div id="pb-al-sel" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>
+        <div id="pb-contexto-alumno"></div>
 
         <div class="sec-lb" style="margin-top:10px">Tipo</div>
         <div class="chip-row" id="pb-tipo">
@@ -815,6 +920,13 @@ function toggleAlumnoSel(alumnoId, nombre, rowEl) {
       ${a.nombre} <b style="font-size:13px;line-height:1;font-weight:400">×</b>
     </span>`
   ).join('');
+  const _modEl = document.querySelector('#pb-modalidad .chip.on');
+  if (_modEl?.textContent?.trim() === 'Individual' && window._alumnosSelProb.length === 1) {
+    mostrarContextoAlumno(window._alumnosSelProb[0].id);
+  } else {
+    const _ctx = document.getElementById('pb-contexto-alumno');
+    if (_ctx) _ctx.innerHTML = '';
+  }
 }
 
 function selUrgProb(el) {
@@ -970,6 +1082,161 @@ async function crearAlertasProb(probId, urgencia, nivel, alumnoId, respId) {
   );
 }
 
+// ─── CHEQUEO DE ALERTAS PERIÓDICAS ────────────────────
+async function checkAlertasProb(instId) {
+  const TTL   = 30 * 60 * 1000;
+  const nowMs = Date.now();
+  if (window._alertasProbCache && (nowMs - window._alertasProbCache.ts) < TTL) {
+    return window._alertasProbCache;
+  }
+  try {
+    const [activasRes, sinRespRes] = await Promise.all([
+      sb.from('problematicas')
+        .select('id,created_at,responsable_id,nivel,registrado_por')
+        .eq('institucion_id', instId)
+        .in('estado', ['abierta','en_seguimiento'])
+        .is('problematica_madre_id', null),
+      sb.from('problematicas')
+        .select('id')
+        .eq('institucion_id', instId)
+        .not('estado', 'in', '("cerrada","derivada")')
+        .is('responsable_id', null)
+        .is('problematica_madre_id', null),
+    ]);
+    const activas   = activasRes.data || [];
+    const tipoC     = sinRespRes.data || [];
+    const activaIds = activas.map(p => p.id);
+
+    const lastInterv = {};
+    if (activaIds.length) {
+      const { data: intrvs } = await sb.from('intervenciones')
+        .select('problematica_id,created_at')
+        .in('problematica_id', activaIds)
+        .order('created_at', { ascending: false });
+      (intrvs || []).forEach(iv => {
+        if (!lastInterv[iv.problematica_id]) lastInterv[iv.problematica_id] = iv.created_at;
+      });
+    }
+
+    const DIAS15 = 15 * 24 * 3600 * 1000;
+    const DIAS30 = 30 * 24 * 3600 * 1000;
+    const tipoA  = activas.filter(p => {
+      const base = lastInterv[p.id] ? new Date(lastInterv[p.id]) : new Date(p.created_at);
+      return (nowMs - base.getTime()) > DIAS15;
+    });
+    const tipoB = activas.filter(p => (nowMs - new Date(p.created_at).getTime()) > DIAS30);
+
+    const result = { ts: nowMs, sinActividad: tipoA.length, prolongadas: tipoB.length, sinResponsable: tipoC.length };
+    window._alertasProbCache = result;
+
+    const DEDUP_KEY = 'kairu_alerta_prob_sent';
+    const DEDUP_TTL = 3 * 24 * 3600 * 1000;
+    const dedup = JSON.parse(localStorage.getItem(DEDUP_KEY) || '{}');
+    Object.keys(dedup).forEach(k => { if (nowMs - dedup[k] > DEDUP_TTL) delete dedup[k]; });
+
+    const notifs = [];
+    if (tipoA.length || tipoB.length || tipoC.length) {
+      const { data: directivos } = await sb.from('usuarios')
+        .select('id,rol,nivel')
+        .eq('institucion_id', instId)
+        .in('rol', ['director_general','directivo_nivel'])
+        .eq('activo', true);
+      const dirGenIds = (directivos || []).filter(u => u.rol === 'director_general').map(u => u.id);
+
+      for (const p of tipoA) {
+        if (dedup[`A_${p.id}`]) continue;
+        const base = lastInterv[p.id] ? new Date(lastInterv[p.id]) : new Date(p.created_at);
+        const dias = Math.floor((nowMs - base.getTime()) / 86400000);
+        const dests = new Set(dirGenIds);
+        if (p.nivel) (directivos || []).filter(u => u.rol === 'directivo_nivel' && u.nivel === p.nivel).forEach(u => dests.add(u.id));
+        if (p.responsable_id) dests.add(p.responsable_id);
+        for (const uid of dests) {
+          if (uid === USUARIO_ACTUAL.id) continue;
+          notifs.push({ usuario_id: uid, tipo: 'alerta_inactividad', titulo: 'Problemática sin actividad reciente', descripcion: `Lleva ${dias} día${dias !== 1 ? 's' : ''} sin intervención registrada.`, referencia_id: p.id, referencia_tabla: 'problematicas' });
+        }
+        dedup[`A_${p.id}`] = nowMs;
+      }
+
+      for (const p of tipoB) {
+        if (dedup[`B_${p.id}`]) continue;
+        const dias = Math.floor((nowMs - new Date(p.created_at).getTime()) / 86400000);
+        const dests = new Set(dirGenIds);
+        if (p.nivel) (directivos || []).filter(u => u.rol === 'directivo_nivel' && u.nivel === p.nivel).forEach(u => dests.add(u.id));
+        for (const uid of dests) {
+          if (uid === USUARIO_ACTUAL.id) continue;
+          notifs.push({ usuario_id: uid, tipo: 'alerta_prolongada', titulo: 'Caso abierto hace más de 30 días', descripcion: `Lleva ${dias} día${dias !== 1 ? 's' : ''} abierto sin cierre.`, referencia_id: p.id, referencia_tabla: 'problematicas' });
+        }
+        dedup[`B_${p.id}`] = nowMs;
+      }
+
+      for (const p of tipoC) {
+        if (dedup[`C_${p.id}`]) continue;
+        for (const uid of dirGenIds) {
+          if (uid === USUARIO_ACTUAL.id) continue;
+          notifs.push({ usuario_id: uid, tipo: 'alerta_sin_responsable', titulo: 'Problemática sin responsable', descripcion: 'No tiene responsable asignado.', referencia_id: p.id, referencia_tabla: 'problematicas' });
+        }
+        dedup[`C_${p.id}`] = nowMs;
+      }
+
+      if (notifs.length) {
+        await sb.from('notificaciones').insert(notifs);
+        localStorage.setItem(DEDUP_KEY, JSON.stringify(dedup));
+      }
+    }
+    return result;
+  } catch(_) {
+    return window._alertasProbCache || { ts: nowMs, sinActividad: 0, prolongadas: 0, sinResponsable: 0 };
+  }
+}
+
+async function mostrarContextoAlumno(alumnoId) {
+  const el = document.getElementById('pb-contexto-alumno');
+  if (!el || !alumnoId) return;
+  el.innerHTML = '';
+  try {
+    const anio = INSTITUCION_ACTUAL?.anio_lectivo || new Date().getFullYear();
+    const [alRes, asistRes] = await Promise.all([
+      sb.from('alumnos').select('curso:cursos(nivel)').eq('id', alumnoId).single(),
+      sb.from('asistencia').select('estado').eq('alumno_id', alumnoId).gte('fecha', `${anio}-01-01`),
+    ]);
+    const banners   = [];
+    const registros = asistRes.data || [];
+    const total     = registros.length;
+    if (total >= 5) {
+      const presentes = registros.filter(a => ['presente','tardanza','media_falta'].includes(a.estado)).length;
+      const pctAsist  = Math.round(presentes / total * 100);
+      if (pctAsist < 80) {
+        const inasist = total - presentes;
+        banners.push(`<div style="padding:7px 10px;background:var(--amb-l);border:1px solid rgba(214,137,16,.3);border-radius:var(--rad);font-size:11px">⚠️ Este alumno tiene <b>${inasist} inasistencia${inasist !== 1 ? 's' : ''}</b> en ${anio} (${100 - pctAsist}% de los días registrados).</div>`);
+      }
+    }
+    try {
+      const nivel = alRes.data?.curso?.nivel;
+      let notaMin = 6;
+      if (nivel) {
+        const { data: cfg } = await sb.from('config_asistencia')
+          .select('nota_minima').eq('institucion_id', USUARIO_ACTUAL.institucion_id).eq('nivel', nivel).maybeSingle();
+        if (cfg?.nota_minima) notaMin = cfg.nota_minima;
+      }
+      const { data: notas } = await sb.from('calificaciones')
+        .select('nota,materia_id').eq('alumno_id', alumnoId).eq('ausente', false).not('nota', 'is', null);
+      if (notas?.length) {
+        const matIds = [...new Set(notas.filter(n => typeof n.nota === 'number' && n.nota < notaMin).map(n => n.materia_id))];
+        if (matIds.length) {
+          const { data: mats } = await sb.from('materias').select('id,nombre').in('id', matIds);
+          const nombresM = (mats || []).map(m => m.nombre).filter(Boolean);
+          if (nombresM.length) {
+            banners.push(`<div style="padding:7px 10px;background:var(--rojo-l);border:1px solid rgba(192,57,43,.2);border-radius:var(--rad);font-size:11px">📉 Notas por debajo del mínimo en: <b>${nombresM.join(', ')}</b>.</div>`);
+          }
+        }
+      }
+    } catch(_) {}
+    if (banners.length) {
+      el.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">${banners.join('')}</div>`;
+    }
+  } catch(_) {}
+}
+
 // ─── INTEGRACIÓN LEGAJO ───────────────────────────────
 async function cargarProbAlumno(alumnoId, contenedorId) {
   const cont = document.getElementById(contenedorId);
@@ -1013,11 +1280,18 @@ async function cargarProbAlumno(alumnoId, contenedorId) {
             <span class="tag ${estCls}" style="font-size:9px">${estLbl}</span>
             ${p.confidencial ? '<span class="tag td" style="font-size:9px">Conf.</span>' : ''}
             <span style="font-size:9px;color:var(--verde);font-weight:600;margin-top:2px">Ver ↓</span>
+            <button class="btn-ghost" style="font-size:9px;padding:2px 5px;margin-top:3px;color:var(--azul)" onclick="event.stopPropagation();irAProblem('${p.id}')">Ir al caso →</button>
           </div>
         </div>
         <div id="prob-leg-det-${p.id}" style="display:none"></div>
       </div>`;
   }).join('');
+}
+
+function irAProblem(probId) {
+  _probFiltros = { estado: 'todas', urgencia: 'todas', nivel: 'todos' };
+  window._probPendienteAbrir = probId;
+  goPage('prob');
 }
 
 async function togDetProbLegajo(probId) {

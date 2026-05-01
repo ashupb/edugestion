@@ -295,6 +295,8 @@ async function rDashDirector() {
   const alertas       = alertasRes.error ? [] : (alertasRes.data || []);
   const totalAlumnos  = alumnosRes.count  ?? 0;
   const totalDocentes = docentesRes.count ?? 0;
+  const sinActividad  = window._alertasProbCache?.sinActividad ?? 0;
+  checkAlertasProb(instId).catch(() => {});
 
   const asistHoy = asistHoyRes.data || [];
   const asistContador = { presente:0, ausente:0, media_falta:0, tardanza:0, justificado:0 };
@@ -337,7 +339,7 @@ async function rDashDirector() {
     <div class="metrics m4" style="margin-bottom:14px">
       <div class="mc" style="cursor:pointer" onclick="goPage('leg')"><div class="mc-v">${totalAlumnos}</div><div class="mc-l">ALUMNOS ACTIVOS</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
       <div class="mc"><div class="mc-v">${totalDocentes}</div><div class="mc-l">DOCENTES</div></div>
-      <div class="mc" style="cursor:pointer" onclick="goPage('prob')"><div class="mc-v" style="color:var(--rojo)">${probs.length}</div><div class="mc-l">SITUACIONES</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
+      <div class="mc" style="cursor:pointer" onclick="goPage('prob')"><div class="mc-v" style="color:var(--rojo)">${probs.length}</div><div class="mc-l">SITUACIONES</div>${sinActividad > 0 ? `<div style="font-size:9px;color:var(--rojo);font-weight:600;margin-top:2px">${sinActividad} inactivas</div>` : ''}<div style="font-size:9px;color:var(--verde);margin-top:${sinActividad > 0 ? '2' : '6'}px;font-weight:600">Ir →</div></div>
       <div class="mc" style="cursor:pointer" onclick="goPage('prob')"><div class="mc-v" style="color:var(--ambar)">${alertas.length}</div><div class="mc-l">ALERTAS</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
     </div>
 
@@ -414,6 +416,7 @@ async function rDashDirectivo() {
   const totalAlumnos  = alumnosRes.count  ?? 0;
   const totalDocentes = new Set((docentesRes.data || []).map(a => a.docente_id).filter(Boolean)).size;
   const probsNivel    = probs.filter(p => p.alumno?.curso?.nivel === nivel);
+  checkAlertasProb(instId).catch(() => {});
 
   const nc = NIVEL_CONFIG[nivel] || NIVEL_CONFIG.todos;
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
