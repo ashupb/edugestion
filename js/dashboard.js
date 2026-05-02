@@ -259,7 +259,7 @@ async function rDashDirector() {
 
   const hoy = sem.hoy;
 
-  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes, asistHoyRes] = await Promise.all([
+  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes, asistHoyRes, noLectRes] = await Promise.all([
     sb.from('problematicas')
       .select('id,urgencia,alumno:alumnos(curso:cursos(nivel))')
       .eq('institucion_id', instId)
@@ -286,7 +286,10 @@ async function rDashDirector() {
     sb.from('usuarios').select('id', { count:'exact', head:true })
       .eq('institucion_id', instId).eq('rol', 'docente').or('activo.is.null,activo.eq.true'),
     sb.from('asistencia').select('estado').eq('fecha', hoy).is('hora_clase', null),
+    sb.from('dias_no_lectivos').select('fecha').eq('institucion_id', instId),
   ]);
+
+  window._diasNoLectivos = new Set((noLectRes.data || []).map(r => r.fecha));
 
   const probs         = probRes.data    || [];
   const objetivos     = objRes.data     || [];
@@ -305,7 +308,10 @@ async function rDashDirector() {
     ? Math.min(100, Math.round((asistContador.presente + asistContador.tardanza + asistContador.media_falta) / totalAlumnos * 100))
     : 0;
   const _asistClr = pctAsist >= 85 ? 'var(--verde)' : pctAsist >= 70 ? 'var(--ambar)' : 'var(--rojo)';
-  const asistCardHTML = asistHoy.length > 0 ? `
+  const asistCardHTML = !esFechaHabil(hoy) ? `
+    <div class="card" style="margin-bottom:14px;border-left:4px solid var(--gris)">
+      <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Día no lectivo</div>
+    </div>` : asistHoy.length > 0 ? `
     <div class="card" style="margin-bottom:14px;border-left:4px solid ${_asistClr}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <div style="font-size:12px;font-weight:600">📋 Asistencia hoy</div>

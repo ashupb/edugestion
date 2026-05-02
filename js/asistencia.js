@@ -885,6 +885,7 @@ async function mostrarGrillaDocente(cursoId, nivel, materiaId, titulo) {
 // LISTA COMPARTIDA (preceptor + director)
 // ═══════════════════════════════════════════════════════
 async function mostrarListaCurso(cursoId, nivel, fecha, editable, materiaId = null, horaClase = null, volverFn = null) {
+  if (editable && !esFechaHabil(fecha)) editable = false;
   const c = document.getElementById('page-asist');
   showLoading('asist');
 
@@ -1001,6 +1002,12 @@ function setEstadoAsist(alumnoId, estado, btn) {
 async function guardarAsistencia(cursoId, nivel, fecha, horaClase, materiaId) {
   const btn = document.getElementById('btn-guardar-asist');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  if (!esFechaHabil(fecha)) {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Confirmar lista'; }
+    alert('No se puede registrar asistencia en días feriados ni días sin clases.');
+    return;
+  }
 
   const instId  = USUARIO_ACTUAL.institucion_id;
   const estados = window._estadoAsist || {};
