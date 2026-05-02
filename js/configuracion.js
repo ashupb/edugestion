@@ -2,6 +2,25 @@
 // CONFIGURACION.JS — Módulo de administración institucional
 // =====================================================
 
+// ─── HELPER: operaciones de admin vía Edge Function ──
+async function _llamarAdminUsers(action, payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  const resp = await fetch(
+    'https://vxsgzutluqfonhakiltz.supabase.co/functions/v1/admin-users',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ action, payload }),
+    }
+  );
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.error || 'Error en operación de administración');
+  return data;
+}
+
 // ─── ESTADO LOCAL ────────────────────────────────────
 let _adminTab       = null;
 let _adminCursos    = [];
@@ -631,48 +650,24 @@ async function _guardarUsuario(userId, esNuevo) {
 
   try {
     if (esNuevo) {
-      const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-          'apikey': SUPABASE_SERVICE_KEY,
+      const authData = await _llamarAdminUsers('crear_usuario', {
+        email,
+        password:      passField || dni,
+        user_metadata: {
+          nombre_completo,
+          username,
+          rol,
+          nivel:          nivel || '',
+          activo,
+          dni:            dni || '',
+          institucion_id: USUARIO_ACTUAL.institucion_id,
+          cursos_ids:     cursos_ids.length ? cursos_ids : [],
         },
-        body: JSON.stringify({
-          email,
-          password: passField || dni,
-          email_confirm: true,
-          user_metadata: {
-            nombre_completo,
-            username,
-            rol,
-            nivel:          nivel || '',
-            activo:         activo,
-            dni:            dni || '',
-            institucion_id: USUARIO_ACTUAL.institucion_id,
-            cursos_ids:     cursos_ids.length ? cursos_ids : [],
-          },
-        }),
+        cursos_ids:     cursos_ids.length ? cursos_ids : [],
+        institucion_id: USUARIO_ACTUAL.institucion_id,
       });
-      const authData = await resp.json();
-      if (authData.error || !authData.id) {
-        throw new Error(authData.error?.message || authData.msg || 'Error al crear usuario en Auth');
-      }
-      // El trigger handle_new_user() ya insertó la fila en public.usuarios.
-      // Verificamos que esté y actualizamos si cursos_ids quedó vacío.
-      if (cursos_ids.length) {
-        await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${authData.id}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            'apikey': SUPABASE_SERVICE_KEY,
-          },
-          body: JSON.stringify({ cursos_ids }),
-        });
-        if (rol === 'preceptor') {
-          await sb.from('cursos').update({ preceptor_id: authData.id }).in('id', cursos_ids);
-        }
+      if (rol === 'preceptor' && cursos_ids.length) {
+        await sb.from('cursos').update({ preceptor_id: authData.id }).in('id', cursos_ids);
       }
     } else {
       const updatePayload = {
@@ -697,17 +692,7 @@ async function _guardarUsuario(userId, esNuevo) {
         }
       }
       if (passField) {
-        const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            'apikey': SUPABASE_SERVICE_KEY,
-          },
-          body: JSON.stringify({ password: passField }),
-        });
-        const data = await resp.json();
-        if (data.error || !data.id) throw new Error(data.error?.message || data.msg || 'Error al actualizar contraseña');
+        await _llamarAdminUsers('actualizar_contrasena', { usuario_id: userId, password: passField });
       }
     }
 

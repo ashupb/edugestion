@@ -1075,8 +1075,6 @@ async function _generarResumenIA(alumnoId) {
       observaciones:       (obsRes.data || []).filter(o => !o.privada).map(o => o.texto),
     };
 
-    console.log('[IA] payload enviado:', JSON.stringify(payload, null, 2));
-
     const resultado = await llamarIA('sintesis_legajo', payload);
     if (!resultado) throw new Error('Sin respuesta');
 
