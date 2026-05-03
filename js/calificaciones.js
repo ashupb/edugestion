@@ -421,7 +421,7 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
   let PERIODO_SEL = periodoActual?.id || '';
 
   const cargarVista = async () => {
-    const [alumnosRes, instanciasRes, califRes, configRes, cierreRes] = await Promise.all([
+    const [alumnosRes, instanciasRes, califRes, configRes, cierreRes, promManualRes] = await Promise.all([
       sb.from('alumnos').select('*').eq('curso_id', cursoId).eq('activo', true).order('apellido'),
       sb.from('instancias_evaluativas')
         .select('*, tipos_evaluacion(nombre,es_recuperatorio)')
@@ -435,6 +435,9 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
         .eq('materia_id', materiaId).eq('curso_id', cursoId).maybeSingle(),
       sb.from('cierres_materia_cuatrimestre').select('*')
         .eq('curso_id', cursoId).eq('materia_id', materiaId).eq('periodo_id', PERIODO_SEL).maybeSingle(),
+      sb.from('calificaciones').select('*')
+        .eq('curso_id', cursoId).eq('materia_id', materiaId)
+        .eq('periodo_id', PERIODO_SEL).is('instancia_id', null).eq('promedio_editado', true),
     ]);
 
     const alumnos    = alumnosRes.data  || [];
@@ -442,6 +445,18 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
     const califs     = califRes.data    || [];
     const config     = configRes.data;
     const cierre     = cierreRes.data;
+
+    const promManualIdx = {};
+    (promManualRes.data || []).forEach(r => { promManualIdx[r.alumno_id] = r; });
+
+    const cierreAbierto = !cierre?.cerrado_at;
+
+    window._docNotas_alumnos   = alumnos;
+    window._docNotas_cursoId   = cursoId;
+    window._docNotas_materiaId = materiaId;
+    window._docNotas_periodoId = PERIODO_SEL;
+    window._docNotas_instId    = USUARIO_ACTUAL.institucion_id;
+    window._docNotas_promIdx   = promManualIdx;
 
     const notaMin   = config?.nota_minima_aprobacion ?? 7;
     const recReempl = config?.recuperatorio_reemplaza ?? true;
@@ -488,11 +503,18 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
 
       <!-- Botones acción -->
       ${(() => {
-        if (cierre?.validado_at) return `
-          <div style="background:var(--azul-l);border-left:3px solid var(--azul);border-radius:var(--rad);
-            padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--azul)">
-            ✅ Cuatrimestre validado por el preceptor — notas bloqueadas
-          </div>`;
+        if (cierre?.validado_at) {
+          const esDir = ['director_general','directivo_nivel'].includes(USUARIO_ACTUAL.rol);
+          return `
+            <div style="background:var(--azul-l);border-left:3px solid var(--azul);border-radius:var(--rad);
+              padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--azul)">✅ Cuatrimestre validado por el preceptor — notas bloqueadas</span>
+              ${esDir ? `<button class="btn-s" style="font-size:11px"
+                onclick="reabrirCierreMateria('${cursoId}','${materiaId}','${PERIODO_SEL}','${_escCal(nombreMateria)}')">
+                🔓 Reabrir
+              </button>` : ''}
+            </div>`;
+        }
         if (cierre?.cerrado_at) return `
           <div style="background:var(--amb-l);border-left:3px solid var(--ambar);border-radius:var(--rad);
             padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ambar)">
@@ -571,16 +593,37 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
                           </span>
                         </td>`;
                     }).join('')}
-                    <td>
-                      ${prom !== null
-                        ? `<span style="font-weight:700;color:${NOTA_COLOR(Math.round(prom), nivel, nombreCurso)}">${Math.round(prom)}</span>`
-                        : `<span style="color:var(--txt3)">—</span>`}
-                    </td>
+                    ${(() => {
+                      const pmRec    = promManualIdx[al.id];
+                      const editado  = pmRec?.promedio_editado;
+                      const promFin  = editado ? pmRec.promedio_manual : prom;
+                      const promRnd  = promFin !== null ? Math.round(promFin) : null;
+                      return `<td style="min-width:56px">
+                        <div style="text-align:center">
+                          ${promRnd !== null
+                            ? `<span style="font-weight:700;color:${editado ? 'var(--ambar)' : NOTA_COLOR(promRnd, nivel, nombreCurso)}">${promRnd}</span>
+                               ${editado ? '<div style="font-size:8px;color:var(--ambar)">(manual)</div>' : ''}`
+                            : `<span style="color:var(--txt3)">—</span>`}
+                          ${cierreAbierto ? `
+                            <button onclick="_toggleDocPromEdit('${al.id}')"
+                              style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--txt3);padding:0;display:block;margin:1px auto 0">✏️</button>
+                            <div id="doc-prom-ed-${al.id}" style="display:none;margin-top:2px">
+                              <input type="number" id="doc-prom-${al.id}" min="1" max="10" step="0.5"
+                                value="${editado && pmRec.promedio_manual !== null ? pmRec.promedio_manual : (promRnd ?? '')}"
+                                style="width:44px;text-align:center;border:1.5px solid var(--ambar);
+                                  border-radius:4px;padding:2px;font-size:11px;font-weight:700">
+                            </div>` : ''}
+                        </div>
+                      </td>`;
+                    })()}
                   </tr>`;
               }).join('')}
             </tbody>
           </table>
-        </div></div>`}`;
+        </div></div>
+        ${cierreAbierto ? `
+        <button class="btn-s" style="width:100%;margin-top:10px"
+          onclick="guardarPromediosDocente()">💾 Guardar promedios editados</button>` : ''}`}`;
   };
 
   window.cambioPeriodoDoc = async (pid) => {
@@ -598,6 +641,53 @@ async function verNotasCursoDocente(cursoId, nivel, materiaId, nombreCurso, nomb
       </div>
     </div>
     <div id="contenido-notas-doc">${await cargarVista()}</div>`;
+}
+
+function _toggleDocPromEdit(alumnoId) {
+  const el = document.getElementById(`doc-prom-ed-${alumnoId}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function guardarPromediosDocente() {
+  const alumnos   = window._docNotas_alumnos   || [];
+  const cursoId   = window._docNotas_cursoId;
+  const materiaId = window._docNotas_materiaId;
+  const periodoId = window._docNotas_periodoId;
+  const instId    = window._docNotas_instId;
+  const promIdx   = window._docNotas_promIdx   || {};
+
+  let saved = 0, errors = 0;
+
+  for (const al of alumnos) {
+    const inp = document.getElementById(`doc-prom-${al.id}`);
+    if (!inp || inp.value === '') continue;
+    const num = parseFloat(inp.value);
+    if (isNaN(num)) continue;
+
+    const existing = promIdx[al.id];
+    const datos = {
+      institucion_id:  instId,
+      alumno_id:       al.id,
+      materia_id:      materiaId,
+      curso_id:        cursoId,
+      periodo_id:      periodoId,
+      instancia_id:    null,
+      promedio_editado: true,
+      promedio_manual:  num,
+      registrado_por:   USUARIO_ACTUAL.id,
+    };
+
+    if (existing?.id) {
+      const { error } = await sb.from('calificaciones').update(datos).eq('id', existing.id);
+      if (error) errors++; else saved++;
+    } else {
+      const { error } = await sb.from('calificaciones').insert([datos]);
+      if (error) errors++; else saved++;
+    }
+  }
+
+  if (errors) { alert(`${errors} promedio(s) no se pudo guardar.`); return; }
+  if (saved) window.cambioPeriodoDoc?.(periodoId);
 }
 
 // ─── MODAL NOTA INDIVIDUAL ────────────────────────────
@@ -2556,7 +2646,7 @@ async function cerrarCuatrimestreDocente(cursoId, materiaId, periodoId, nombreMa
   window.cambioPeriodoDoc?.(periodoId);
 }
 
-async function validarCierreMateria(cursoId, materiaId, periodoId, nombreMateria) {
+async function validarCierreMateria(cursoId, materiaId, periodoId, nombreMateria, contexto, nivel) {
   if (!confirm(`¿Validás el cierre de "${nombreMateria}"? Las notas quedarán bloqueadas.`)) return;
 
   const { error } = await sb.from('cierres_materia_cuatrimestre')
@@ -2564,7 +2654,26 @@ async function validarCierreMateria(cursoId, materiaId, periodoId, nombreMateria
     .eq('curso_id', cursoId).eq('materia_id', materiaId).eq('periodo_id', periodoId);
 
   if (error) { alert('Error al validar: ' + error.message); return; }
-  window.cambioPeriodoDir?.(periodoId);
+  if (contexto === 'grilla') {
+    verGrillaMateriaPreceptor(cursoId, materiaId, nombreMateria, periodoId, nivel);
+  } else {
+    window.cambioPeriodoDir?.(periodoId);
+  }
+}
+
+async function reabrirCierreMateria(cursoId, materiaId, periodoId, nombreMateria, contexto, nivel) {
+  if (!confirm(`¿Reabrís el cuatrimestre de "${nombreMateria}"? Se borrará el cierre y la validación.`)) return;
+
+  const { error } = await sb.from('cierres_materia_cuatrimestre')
+    .update({ cerrado_por: null, cerrado_at: null, validado_por: null, validado_at: null })
+    .eq('curso_id', cursoId).eq('materia_id', materiaId).eq('periodo_id', periodoId);
+
+  if (error) { alert('Error al reabrir: ' + error.message); return; }
+  if (contexto === 'grilla') {
+    verGrillaMateriaPreceptor(cursoId, materiaId, nombreMateria, periodoId, nivel);
+  } else {
+    window.cambioPeriodoDoc?.(periodoId);
+  }
 }
 
 async function validarCierreCurso(cursoId, periodoId, nombreCurso) {
@@ -2619,10 +2728,16 @@ async function verGrillaMateriaPreceptor(cursoId, materiaId, nombreMateria, peri
     promedios[al.id] = notas.length ? notas.reduce((a, b) => a + b, 0) / notas.length : null;
   });
 
+  const esDirectivo = ['director_general','directivo_nivel'].includes(USUARIO_ACTUAL.rol);
+
   const estadoBanner = cierre?.validado_at
     ? `<div style="background:var(--verde-l);border-left:3px solid var(--verde);border-radius:var(--rad);
-        padding:10px 14px;margin-bottom:12px;font-size:11px;color:var(--verde);font-weight:600">
-        ✅ Materia validada por preceptoría
+        padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;font-weight:600;color:var(--verde)">✅ Materia validada por preceptoría</span>
+        ${esDirectivo ? `<button class="btn-s" style="font-size:11px"
+          onclick="reabrirCierreMateria('${cursoId}','${materiaId}','${periodoId}','${_escCal(nombreMateria)}','grilla','${nivel}')">
+          🔓 Reabrir
+        </button>` : ''}
       </div>`
     : cierre?.cerrado_at
       ? `<div style="background:var(--amb-l);border-left:3px solid var(--ambar);border-radius:var(--rad);
@@ -2630,7 +2745,7 @@ async function verGrillaMateriaPreceptor(cursoId, materiaId, nombreMateria, peri
           <span style="font-size:11px;font-weight:600;color:var(--ambar)">⏳ Cerrado por docente — pendiente de validación</span>
           ${USUARIO_ACTUAL.rol === 'preceptor' ? `
             <button class="btn-p" style="font-size:11px;background:var(--ambar)"
-              onclick="validarCierreMateria('${cursoId}','${materiaId}','${periodoId}','${_escCal(nombreMateria)}')">
+              onclick="validarCierreMateria('${cursoId}','${materiaId}','${periodoId}','${_escCal(nombreMateria)}','grilla','${nivel}')">
               ✓ Validar cierre
             </button>` : ''}
         </div>`
