@@ -21,7 +21,7 @@ const ESTADOS_ASIST = {
   media_falta:       { label:'Media falta',       short:'M',  icon:'🕐', color:'var(--ambar)', bg:'var(--amb-l)',   valor:0.5 },
   tardanza:          { label:'Tardanza',          short:'T',  icon:'⏰', color:'var(--ambar)', bg:'var(--amb-l)',   valor:0.25 },
   justificado:       { label:'Justificado',       short:'J',  icon:'📋', color:'var(--azul)',  bg:'var(--azul-l)',  valor:0 },
-  retiro_anticipado: { label:'Retiro anticipado', short:'RA', icon:'🚶', color:'#7c3aed',      bg:'#f5f3ff',       valor:0.25 },
+  retiro_anticipado: { label:'Retiro anticipado', short:'RA', icon:'🚶', color:'#7c3aed',      bg:'#f5f3ff',       valor:0 },
 };
 
 const NIVEL_COLORS = {
@@ -342,8 +342,8 @@ function _htmlTablaGrillaAsist(alumnos, fechas, asistIdx, config) {
 }
 
 function _filtrarGrillaFechas() {
-  const desde = document.getElementById('grilla-desde')?.value || '';
-  const hasta = document.getElementById('grilla-hasta')?.value || '';
+  const desde = getFechaInput('grilla-desde');
+  const hasta = getFechaInput('grilla-hasta');
   const { alumnos, fechas: todas, asistIdx, config } = window._grillaData || {};
   if (!alumnos) return;
   const filtradas = todas.filter(f => (!desde || f >= desde) && (!hasta || f <= hasta));
@@ -375,8 +375,6 @@ async function mostrarGrillaDirector(cursoId, nivel) {
   });
 
   const hoy = hoyISO();
-  const primerDiaMes = hoy.slice(0,7) + '-01';
-  const fechasFiltradas = fechas.filter(f => f >= primerDiaMes);
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -391,15 +389,13 @@ async function mostrarGrillaDirector(cursoId, nivel) {
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
       <button class="btn-s" style="font-size:11px" onclick="_descargarGrillaCSV()">⬇ Descargar</button>
       <span style="font-size:11px;color:var(--txt2)">Desde</span>
-      <input type="date" id="grilla-desde" value="${primerDiaMes}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-desde', fechas[0] || hoy)}
       <span style="font-size:11px;color:var(--txt2)">Hasta</span>
-      <input type="date" id="grilla-hasta" value="${hoy}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-hasta', hoy)}
       <button class="btn-s" style="font-size:11px" onclick="_filtrarGrillaFechas()">Filtrar</button>
     </div>
     <div id="grilla-tabla-wrap">
-      ${_htmlTablaGrillaAsist(alumnos, fechasFiltradas, asistIdx, {})}
+      ${_htmlTablaGrillaAsist(alumnos, fechas, asistIdx, {})}
     </div>`}`;
 
   window._grillaData = { alumnos, fechas, asistIdx, nombreCurso: `${curso?.nombre}${curso?.division||''}`, config:{} };
@@ -593,8 +589,6 @@ async function mostrarGrillaPreceptor(cursoId, nivel, nombreCurso, volverFn = nu
   const config = CONFIG_ASIST[nivel] || {};
 
   const hoy = hoyISO();
-  const primerDiaMes = hoy.slice(0,7) + '-01';
-  const fechasFiltradas = fechas.filter(f => f >= primerDiaMes);
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -609,15 +603,13 @@ async function mostrarGrillaPreceptor(cursoId, nivel, nombreCurso, volverFn = nu
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
       <button class="btn-s" style="font-size:11px" onclick="_descargarGrillaCSV()">⬇ Descargar</button>
       <span style="font-size:11px;color:var(--txt2)">Desde</span>
-      <input type="date" id="grilla-desde" value="${primerDiaMes}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-desde', fechas[0] || hoy)}
       <span style="font-size:11px;color:var(--txt2)">Hasta</span>
-      <input type="date" id="grilla-hasta" value="${hoy}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-hasta', hoy)}
       <button class="btn-s" style="font-size:11px" onclick="_filtrarGrillaFechas()">Filtrar</button>
     </div>
     <div id="grilla-tabla-wrap">
-      ${_htmlTablaGrillaAsist(alumnos, fechasFiltradas, asistIdx, config)}
+      ${_htmlTablaGrillaAsist(alumnos, fechas, asistIdx, config)}
     </div>`}`;
 
   window._grillaData = { alumnos, fechas, asistIdx, nombreCurso, config };
@@ -849,8 +841,6 @@ async function mostrarGrillaDocente(cursoId, nivel, materiaId, titulo) {
   const config = CONFIG_ASIST[nivel] || {};
 
   const hoy = hoyISO();
-  const primerDiaMes = hoy.slice(0,7) + '-01';
-  const fechasFiltradas = fechas.filter(f => f >= primerDiaMes);
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -865,15 +855,13 @@ async function mostrarGrillaDocente(cursoId, nivel, materiaId, titulo) {
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
       <button class="btn-s" style="font-size:11px" onclick="_descargarGrillaCSV()">⬇ Descargar</button>
       <span style="font-size:11px;color:var(--txt2)">Desde</span>
-      <input type="date" id="grilla-desde" value="${primerDiaMes}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-desde', fechas[0] || hoy)}
       <span style="font-size:11px;color:var(--txt2)">Hasta</span>
-      <input type="date" id="grilla-hasta" value="${hoy}"
-        style="font-size:11px;padding:4px 8px;border:1px solid var(--brd);border-radius:var(--rad);background:var(--surf)">
+      ${renderFechaInput('grilla-hasta', hoy)}
       <button class="btn-s" style="font-size:11px" onclick="_filtrarGrillaFechas()">Filtrar</button>
     </div>
     <div id="grilla-tabla-wrap">
-      ${_htmlTablaGrillaAsist(alumnos, fechasFiltradas, asistIdx, config)}
+      ${_htmlTablaGrillaAsist(alumnos, fechas, asistIdx, config)}
     </div>`}`;
 
   window._grillaData = { alumnos, fechas, asistIdx, nombreCurso: titulo, config };
@@ -943,9 +931,11 @@ async function mostrarListaCurso(cursoId, nivel, fecha, editable, materiaId = nu
 
     ${editable ? `
     <div class="asist-leyenda">
-      ${Object.entries(ESTADOS_ASIST).map(([k,v]) => `
-        <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:${v.bg};color:${v.color}">${v.icon} ${v.label}</span>
-      `).join('')}
+      ${['presente','ausente','media_falta','tardanza','justificado'].map(k => {
+        const v = ESTADOS_ASIST[k];
+        return `<span style="font-size:10px;padding:3px 8px;border-radius:20px;background:${v.bg};color:${v.color}">${v.icon} ${v.label}</span>`;
+      }).join('')}
+      <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:#f5f3ff;color:#7c3aed">🚶 Retiro anticipado (observación sobre Presente)</span>
     </div>` : ''}
 
     <div class="card" style="padding:0;overflow:hidden">
@@ -964,16 +954,25 @@ async function mostrarListaCurso(cursoId, nivel, fecha, editable, materiaId = nu
               </div>
               ${editable ? `
               <div class="asist-btns">
-                ${Object.entries(ESTADOS_ASIST).map(([k,v]) => `
-                  <button class="asist-btn ${est===k?'on':''}"
-                    style="${est===k?`background:${v.color};color:#fff;border-color:${v.color}`:''}"
+                ${['presente','ausente','media_falta','tardanza','justificado'].map(k => {
+                  const v = ESTADOS_ASIST[k];
+                  const isOn = est === k || (k === 'presente' && est === 'retiro_anticipado');
+                  return `<button class="asist-btn ${isOn?'on':''}"
+                    style="${isOn?`background:${v.color};color:#fff;border-color:${v.color}`:''}"
                     data-alumno="${al.id}" data-estado="${k}"
                     onclick="setEstadoAsist('${al.id}','${k}',this)"
                     title="${v.label}">
                     ${v.icon}
-                  </button>`).join('')}
+                  </button>`;
+                }).join('')}
+                <button class="asist-btn asist-ra-btn ${est==='retiro_anticipado'?'on':''}"
+                  style="${est==='retiro_anticipado'?'background:#7c3aed;color:#fff;border-color:#7c3aed':'opacity:0.45'}"
+                  onclick="toggleRetiroAnticipado('${al.id}')"
+                  title="Retiro anticipado (observación)">
+                  🚶
+                </button>
               </div>` : `
-              <div style="font-size:13px">${ESTADOS_ASIST[est]?.icon||'—'}</div>`}
+              <div style="font-size:13px">${est==='retiro_anticipado'?'✅<span style="font-size:9px;color:#7c3aed;margin-left:2px">RA</span>':(ESTADOS_ASIST[est]?.icon||'—')}</div>`}
             </div>
             ${editable ? `
             <div id="just-${al.id}" style="display:${est==='justificado'?'block':'none'};padding:8px 14px;background:var(--azul-l);border-top:1px solid var(--brd)">
@@ -999,10 +998,13 @@ async function mostrarListaCurso(cursoId, nivel, fecha, editable, materiaId = nu
 function setEstadoAsist(alumnoId, estado, btn) {
   window._estadoAsist[alumnoId] = estado;
   const fila = document.getElementById(`fila-${alumnoId}`);
-  fila?.querySelectorAll('.asist-btn').forEach(b => {
+
+  // Botones principales (5 estados sin RA)
+  fila?.querySelectorAll('.asist-btn:not(.asist-ra-btn)').forEach(b => {
     const k = b.dataset.estado;
     const v = ESTADOS_ASIST[k];
-    if (k === estado) {
+    const isOn = k === estado || (k === 'presente' && estado === 'retiro_anticipado');
+    if (isOn) {
       b.classList.add('on');
       b.style.cssText = `background:${v.color};color:#fff;border-color:${v.color}`;
     } else {
@@ -1010,8 +1012,24 @@ function setEstadoAsist(alumnoId, estado, btn) {
       b.style.cssText = '';
     }
   });
+
+  // Toggle RA
+  const raBtn = fila?.querySelector('.asist-ra-btn');
+  if (raBtn) {
+    const raOn = estado === 'retiro_anticipado';
+    raBtn.classList.toggle('on', raOn);
+    raBtn.style.cssText = raOn ? 'background:#7c3aed;color:#fff;border-color:#7c3aed' : 'opacity:0.45';
+  }
+
   const justDiv = document.getElementById(`just-${alumnoId}`);
   if (justDiv) justDiv.style.display = estado === 'justificado' ? 'block' : 'none';
+}
+
+function toggleRetiroAnticipado(alumnoId) {
+  const cur = window._estadoAsist[alumnoId] || 'presente';
+  // RA solo aplica sobre presente; si el estado es otro, no hace nada
+  if (cur !== 'presente' && cur !== 'retiro_anticipado') return;
+  setEstadoAsist(alumnoId, cur === 'retiro_anticipado' ? 'presente' : 'retiro_anticipado', null);
 }
 
 async function guardarAsistencia(cursoId, nivel, fecha, horaClase, materiaId) {
@@ -1274,9 +1292,9 @@ async function verAlumnoAsist(alumnoId) {
     <div class="sec-lb">Grilla de asistencia</div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
       <label style="font-size:11px;color:var(--txt2)">Desde</label>
-      <input type="date" id="alumno-asist-desde" value="${desde}" class="sel-estilizado" style="font-size:11px;padding:4px 8px">
+      ${renderFechaInput('alumno-asist-desde', desde)}
       <label style="font-size:11px;color:var(--txt2)">Hasta</label>
-      <input type="date" id="alumno-asist-hasta" value="${hasta}" class="sel-estilizado" style="font-size:11px;padding:4px 8px">
+      ${renderFechaInput('alumno-asist-hasta', hasta)}
       <button class="btn-s" style="font-size:11px" onclick="_filtrarGrillaAlumno()">Filtrar</button>
     </div>
     <div id="alumno-grilla-wrap">
@@ -1285,8 +1303,8 @@ async function verAlumnoAsist(alumnoId) {
 }
 
 function _filtrarGrillaAlumno() {
-  const desde = document.getElementById('alumno-asist-desde')?.value;
-  const hasta = document.getElementById('alumno-asist-hasta')?.value;
+  const desde = getFechaInput('alumno-asist-desde');
+  const hasta = getFechaInput('alumno-asist-hasta');
   const wrap  = document.getElementById('alumno-grilla-wrap');
   if (wrap) wrap.innerHTML = _renderGrillaAlumnoHTML(window._alumnoAsistFull || [], window._alumnoAsistConfig || {}, desde, hasta);
 }
