@@ -596,8 +596,7 @@ async function _tabAsistencia(c) {
     const { data, error } = await sb.from('asistencia')
       .select('fecha,estado,hora_clase,materia_id')
       .eq('alumno_id', _legAlumnoSel.id)
-      .order('fecha', { ascending: false })
-      .limit(60);
+      .order('fecha', { ascending: false });
     if (error) throw error;
     const lista = data || [];
 
@@ -606,27 +605,27 @@ async function _tabAsistencia(c) {
       return;
     }
 
-    const ausentes   = lista.filter(r => r.estado === 'ausente').length;
-    const mediaFalta = lista.filter(r => r.estado === 'media_falta').length;
-    const tardanzas  = lista.filter(r => r.estado === 'tardanza').length;
-    // Días únicos para calcular % de asistencia
-    const diasUnicos = [...new Set(lista.filter(r => !r.hora_clase).map(r => r.fecha))];
-    const ausentesDias = lista.filter(r => !r.hora_clase && r.estado === 'ausente').map(r => r.fecha);
-    const ausDiasUnicos = [...new Set(ausentesDias)].length;
-    const pct = diasUnicos.length ? Math.round(((diasUnicos.length - ausDiasUnicos) / diasUnicos.length) * 100) : 100;
+    // Solo registros diarios para métricas (los por hora no computan para regularidad)
+    const diarios    = lista.filter(r => !r.hora_clase);
+    const ausentes   = diarios.filter(r => r.estado === 'ausente').length;
+    const mediaFalta = diarios.filter(r => r.estado === 'media_falta').length;
+    const tardanzas  = diarios.filter(r => r.estado === 'tardanza').length;
+    const diasUnicos = [...new Set(diarios.map(r => r.fecha))];
+    const diasPresentes = [...new Set(diarios.filter(r => ['presente','tardanza','media_falta','retiro_anticipado'].includes(r.estado)).map(r => r.fecha))].length;
+    const pct = diasUnicos.length ? Math.round((diasPresentes / diasUnicos.length) * 100) : 100;
     const pcClr = pct >= 85 ? 'var(--verde)' : pct >= 75 ? 'var(--ambar)' : 'var(--rojo)';
 
     const ESTADO_LABEL = {
       presente:'Presente', ausente:'Ausente', media_falta:'Media falta',
       tardanza:'Tardanza', justificado:'Justificado',
     };
-    const rows = lista.slice(0, 30).map(r => {
+    const rows = diarios.slice(0, 30).map(r => {
       const clr = r.estado === 'presente' || r.estado === 'justificado'
         ? 'var(--verde)' : r.estado === 'ausente' ? 'var(--rojo)' : 'var(--ambar)';
       return `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd)">
           <div style="width:8px;height:8px;border-radius:50%;background:${clr};flex-shrink:0"></div>
-          <div style="font-size:11px;flex:1">${formatFechaLatam(r.fecha)}${r.hora_clase ? ' · <span style="color:var(--txt3)">'+r.hora_clase+'</span>' : ''}</div>
+          <div style="font-size:11px;flex:1">${formatFechaLatam(r.fecha)}</div>
           <div style="font-size:10px;color:${clr};font-weight:500">${ESTADO_LABEL[r.estado] || r.estado}</div>
         </div>`;
     }).join('');
@@ -1028,14 +1027,15 @@ async function _generarResumenIA(alumnoId) {
       .limit(5);
     if (obsRes.error) console.error('[IA] observaciones:', obsRes.error);
 
-    // Calcular % asistencia — días únicos sin hora_clase, solo lunes a viernes
+    // Calcular % asistencia — solo registros diarios (hora_clase null), lunes a viernes
     const asistencia   = asistRes.data || [];
     const esDiaHabil   = (f) => { const d = new Date(f + 'T12:00:00').getDay(); return d !== 0 && d !== 6; };
-    const diasUnicos   = [...new Set(asistencia.filter(r => !r.hora_clase && esDiaHabil(r.fecha)).map(r => r.fecha))];
-    const ausDias      = [...new Set(asistencia.filter(r => !r.hora_clase && r.estado === 'ausente' && esDiaHabil(r.fecha)).map(r => r.fecha))];
+    const diariosIA    = asistencia.filter(r => !r.hora_clase && esDiaHabil(r.fecha));
+    const diasUnicos   = [...new Set(diariosIA.map(r => r.fecha))];
     const diasTotal    = diasUnicos.length;
-    const diasAusentes = ausDias.length;
-    const pctAsist     = diasTotal ? Math.round(((diasTotal - diasAusentes) / diasTotal) * 100) : null;
+    const diasAusentes = [...new Set(diariosIA.filter(r => r.estado === 'ausente').map(r => r.fecha))].length;
+    const diasPresentesIA = [...new Set(diariosIA.filter(r => ['presente','tardanza','media_falta','retiro_anticipado'].includes(r.estado)).map(r => r.fecha))].length;
+    const pctAsist     = diasTotal ? Math.round((diasPresentesIA / diasTotal) * 100) : null;
 
     // Agrupar notas por materia
     const porMateria = {};
