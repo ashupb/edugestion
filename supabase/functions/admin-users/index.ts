@@ -88,7 +88,7 @@ serve(async (req) => {
 
       // Upsert explícito en usuarios — no depende del trigger handle_new_user
       const meta = payload.user_metadata;
-      await fetch(`${SUPABASE_URL}/rest/v1/usuarios`, {
+      const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/usuarios`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -109,6 +109,10 @@ serve(async (req) => {
           cursos_ids:      payload.cursos_ids?.length ? payload.cursos_ids : [],
         }),
       });
+      if (!upsertRes.ok) {
+        const upsertErr = await upsertRes.json().catch(() => ({}));
+        throw new Error("Error al crear perfil de usuario: " + (upsertErr.message || upsertErr.details || upsertErr.hint || upsertRes.status));
+      }
 
       return new Response(
         JSON.stringify({ id: authData.id }),
