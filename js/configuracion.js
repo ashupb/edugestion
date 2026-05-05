@@ -368,7 +368,7 @@ function _renderUsuariosList() {
   if (_usrFiltroRol   !== 'todos') filtrados = filtrados.filter(u => u.rol   === _usrFiltroRol);
   if (_usrFiltroNivel !== 'todos') filtrados = filtrados.filter(u => u.nivel === _usrFiltroNivel);
 
-  const roles   = ['director_general', 'directivo_nivel', 'docente', 'preceptor', 'eoe'];
+  const roles   = ['director_general', 'directivo_nivel', 'secretario', 'vicedirector', 'docente', 'preceptor', 'eoe'];
   const niveles = ['inicial', 'primario', 'secundario'];
   const puedeCrear = USUARIO_ACTUAL.rol === 'director_general';
 

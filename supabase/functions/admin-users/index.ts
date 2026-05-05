@@ -51,7 +51,7 @@ serve(async (req) => {
     const perfilArr = await perfilRes.json();
     const perfil = Array.isArray(perfilArr) ? perfilArr[0] : null;
 
-    if (!perfil || !["director_general", "directivo_nivel"].includes(perfil.rol)) {
+    if (!perfil || !["director_general", "directivo_nivel", "secretario", "vicedirector"].includes(perfil.rol)) {
       return new Response(JSON.stringify({ error: "No autorizado" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
