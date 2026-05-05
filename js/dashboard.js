@@ -760,10 +760,10 @@ async function rDashPreceptor() {
   const ayerHabil = esFechaHabil(ayer);
 
   // Asistencia hoy + ayer + alertas (requiere cursos)
-  let asistHoy = [], asistAyer = [], alertasAlumnos = [];
+  let asistHoy = [], asistAyer = [], alertasAlumnos = [], totalAlumnos = 0;
   if (cursoIdsList.length) {
     const queries = [
-      sb.from('asistencia').select('curso_id')
+      sb.from('asistencia').select('curso_id,estado')
         .in('curso_id', cursoIdsList).eq('fecha', sem.hoy).is('hora_clase', null),
       sb.from('alumnos').select('id')
         .in('curso_id', cursoIdsList).eq('activo', true),
@@ -775,6 +775,7 @@ async function rDashPreceptor() {
     const results = await Promise.all(queries);
     asistHoy = results[0].data || [];
     const alumnoIds = (results[1].data || []).map(a => a.id);
+    totalAlumnos = alumnoIds.length;
     if (ayerHabil) asistAyer = results[2]?.data || [];
     if (alumnoIds.length) {
       const { data: alertasData } = await sb.from('alertas_asistencia')
@@ -847,10 +848,9 @@ async function rDashPreceptor() {
     }).join('')}` : '';
 
   const probsNivel     = probs.filter(p => p.alumno?.curso?.nivel === nivel);
-  const listasOK       = cursosConListaHoy.size;
-  const listasTotal    = cursos.length;
-  const asistPct       = listasTotal ? Math.round(listasOK / listasTotal * 100) : 0;
-  const asistColor     = asistPct >= 100 ? 'var(--verde)' : asistPct > 0 ? 'var(--ambar)' : 'var(--rojo)';
+  const presentes      = asistHoy.filter(r => ['presente','tardanza','media_falta'].includes(r.estado)).length;
+  const asistPct       = totalAlumnos ? Math.round(presentes / totalAlumnos * 100) : 0;
+  const asistColor     = asistPct >= 85 ? 'var(--verde)' : asistPct >= 70 ? 'var(--ambar)' : 'var(--rojo)';
   const pendColor      = pendientesHoy.length ? 'var(--rojo)' : 'var(--verde)';
   const urgentesNivel  = probsNivel.filter(p => p.urgencia === 'alta').length;
 
