@@ -6,6 +6,8 @@ let _objVista = 'lista';
 let _objDetalleId = null;
 let _objFiltros = { categoria: '', estado: '' };
 let _objCache = [];
+let _foTiposInc = [];
+let _foTiposAcc = [];
 
 const CAT_OBJ = {
   academico:     { label:'Académico',     color:'var(--azul)',   bg:'var(--azul-l)',  tag:'tp' },
@@ -103,24 +105,46 @@ function _rObjLista() {
   _renderCardsObj();
 }
 
+function _objCatKeys(obj) {
+  // Soporta categorias[] (nuevo) y categoria string (viejo)
+  if (obj.categorias?.length) return obj.categorias;
+  if (obj.categoria) return [obj.categoria];
+  return [];
+}
+function _objNivelKeys(obj) {
+  // Soporta niveles[] (nuevo) y nivel string (viejo)
+  if (obj.niveles?.length) return obj.niveles;
+  if (obj.nivel) return [obj.nivel];
+  return [];
+}
+function _renderCatTags(catKeys) {
+  return catKeys.map(k => {
+    const c = CAT_OBJ[k];
+    return c ? `<span class="tag ${c.tag}">${c.label}</span>` : `<span class="tag tgr">${k}</span>`;
+  }).join('');
+}
+
 function _renderCardsObj() {
   let lista = [..._objCache];
   if (!_objFiltros.estado)    lista = lista.filter(o => o.estado !== 'archivado');
-  if (_objFiltros.categoria)  lista = lista.filter(o => o.categoria === _objFiltros.categoria);
-  if (_objFiltros.estado)     lista = lista.filter(o => o.estado    === _objFiltros.estado);
+  if (_objFiltros.categoria)  lista = lista.filter(o => _objCatKeys(o).includes(_objFiltros.categoria));
+  if (_objFiltros.estado)     lista = lista.filter(o => o.estado === _objFiltros.estado);
   // Filtrar por nivel del usuario (directores ven todo)
   const rolUser = USUARIO_ACTUAL?.rol;
   if (!['director_general','admin'].includes(rolUser) && USUARIO_ACTUAL?.nivel) {
-    lista = lista.filter(o => !o.nivel || o.nivel === USUARIO_ACTUAL.nivel);
+    lista = lista.filter(o => {
+      const nv = _objNivelKeys(o);
+      return !nv.length || nv.includes(USUARIO_ACTUAL.nivel);
+    });
   }
   const cont = document.getElementById('obj-cards');
   if (!cont) return;
   if (!lista.length) { cont.innerHTML = '<div class="empty-state">🎯<br>No hay objetivos con ese filtro.</div>'; return; }
   cont.innerHTML = lista.map(obj => {
-    const cat  = CAT_OBJ[obj.categoria]       || CAT_OBJ.institucional;
-    const tnd  = TENDENCIA_OBJ[obj.tendencia] || TENDENCIA_OBJ.estable;
-    const est  = ESTADO_OBJ[obj.estado]       || ESTADO_OBJ.activo;
-    const prog     = obj.progreso ?? obj.cumplimiento ?? 0;
+    const catKeys  = _objCatKeys(obj);
+    const firstCat = CAT_OBJ[catKeys[0]] || CAT_OBJ.institucional;
+    const tnd      = TENDENCIA_OBJ[obj.tendencia] || TENDENCIA_OBJ.estable;
+    const est      = ESTADO_OBJ[obj.estado]       || ESTADO_OBJ.activo;
     const incCount = obj.incs?.[0]?.count ?? 0;
     const semClr   = obj.estado==='en_riesgo'?'var(--rojo)':obj.estado==='logrado'?'var(--azul)':obj.estado==='archivado'?'var(--txt3)':'var(--verde)';
     const esActivo = ['activo','en_riesgo'].includes(obj.estado);
@@ -132,16 +156,15 @@ function _renderCardsObj() {
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px">
               <div style="font-size:12px;font-weight:600;line-height:1.3">${obj.nombre}</div>
               <div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-                <span class="tag ${cat.tag}">${cat.label}</span>
+                ${catKeys.length ? _renderCatTags(catKeys) : ''}
                 <span class="tag ${est.tag}">${est.label}</span>
               </div>
             </div>
             <div style="font-size:10px;color:var(--txt2);margin-bottom:6px">${obj.responsable_texto||'—'}</div>
-            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt3);margin-bottom:3px">
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt3)">
               ${obj.tendencia !== 'sin_datos' ? `<span style="color:${tnd.color};font-weight:600">${tnd.icon} ${tnd.label}</span>` : '<span style="color:var(--txt3);font-style:italic">Sin medición aún</span>'}
-              <span>${prog}% · ${incCount} incidente${incCount!==1?'s':''}</span>
+              <span>${incCount} incidente${incCount!==1?'s':''}</span>
             </div>
-            <div class="bb"><div class="bf" style="width:${prog}%;background:${cat.color}"></div></div>
           </div>
         </div>
         ${esActivo && _objPuedeRegistrarInc() ? `
@@ -181,10 +204,11 @@ async function _rObjDetalle(objId) {
   const incs     = incsRes.data  || [];
   const hitos    = hitosRes.data || [];
   const tendData = tendRes.data  || null;
-  const cat      = CAT_OBJ[obj.categoria]       || CAT_OBJ.institucional;
+  const catKeys  = _objCatKeys(obj);
+  const firstCat = CAT_OBJ[catKeys[0]] || CAT_OBJ.institucional;
   const tnd      = TENDENCIA_OBJ[obj.tendencia] || TENDENCIA_OBJ.estable;
   const est      = ESTADO_OBJ[obj.estado]       || ESTADO_OBJ.activo;
-  const prog     = obj.progreso ?? obj.cumplimiento ?? 0;
+  const nivelKeys = _objNivelKeys(obj);
   const esActivo = ['activo','en_riesgo'].includes(obj.estado);
 
   const hitosHTML = hitos.length ? hitos.map(h => `
@@ -229,15 +253,14 @@ async function _rObjDetalle(objId) {
     </div>
     <div class="card" style="margin-bottom:12px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        <span class="tag ${cat.tag}">${cat.label}</span>
+        ${catKeys.length ? _renderCatTags(catKeys) : ''}
+        ${nivelKeys.length ? nivelKeys.map(n=>`<span class="tag tgr" style="font-size:9px">${n[0].toUpperCase()+n.slice(1)}</span>`).join('') : ''}
         <span class="tag ${est.tag}">${est.label}</span>
-        <span style="font-size:11px;font-weight:600;color:${tnd.color}">${tnd.icon} ${tnd.label}</span>
+        ${obj.tendencia !== 'sin_datos' ? `<span style="font-size:11px;font-weight:600;color:${tnd.color}">${tnd.icon} ${tnd.label}</span>` : ''}
       </div>
       ${obj.descripcion?`<div style="font-size:12px;color:var(--txt2);margin-bottom:10px">${obj.descripcion}</div>`:''}
       ${obj.punto_de_partida?`<div style="font-size:11px;margin-bottom:8px;padding:7px 10px;background:var(--bg);border-radius:var(--rad)"><span style="color:var(--txt3)">Punto de partida:</span> ${obj.punto_de_partida}</div>`:''}
       ${(obj.meta_descripcion||obj.meta)?`<div style="font-size:11px;margin-bottom:10px"><b>Meta:</b> ${obj.meta_descripcion||obj.meta}</div>`:''}
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt3);margin-bottom:4px"><span>Progreso</span><span>${prog}%</span></div>
-      <div class="bb" style="margin-bottom:10px"><div class="bf" style="width:${prog}%;background:${cat.color}"></div></div>
       <div style="font-size:11px;color:var(--txt2);display:grid;grid-template-columns:1fr 1fr;gap:4px">
         <span style="grid-column:1/-1"><b>Responsable${(obj.responsable_ids?.length??0)>1?'s':''}:</b> ${respNombre}</span>
         ${obj.fecha_inicio   ?`<span><b>Inicio:</b> ${formatFechaCorta(obj.fecha_inicio)}</span>`   :'<span></span>'}
@@ -310,7 +333,9 @@ function _renderTendenciaWidget(obj, tendData) {
       </div>
       ${sinDatos ? `
         <div style="font-size:11px;color:var(--txt3);font-style:italic">
-          El estado aparecerá cuando se complete el primer período de medición con incidentes registrados. Por ahora no hay suficientes datos para comparar.
+          ${obj.punto_de_partida
+            ? `Tiene punto de partida definido (<b>${obj.punto_de_partida}</b>). El estado aparecerá al completarse el primer período de medición.`
+            : 'Sin punto de partida: se necesitan dos períodos para establecer la línea base. El primero servirá de referencia para el segundo.'}
         </div>
       ` : `
         <div style="font-size:11px;color:var(--txt2);margin-bottom:10px">
@@ -401,10 +426,31 @@ async function _abrirFormObj(objId) {
   const usrRes = await sb.from('usuarios').select('id,nombre_completo,rol')
     .eq('institucion_id', USUARIO_ACTUAL.institucion_id).or('activo.is.null,activo.eq.true')
     .order('rol').order('nombre_completo');
-  const cats = Object.entries(CAT_OBJ).map(([k,v]) =>
-    `<option value="${k}" ${obj?.categoria===k?'selected':''}>${v.label}</option>`).join('');
-  const nivelesOpts = ['primario','secundario','terciario'].map(n =>
-    `<option value="${n}" ${obj?.nivel===n?'selected':''}>${n[0].toUpperCase()+n.slice(1)}</option>`).join('');
+
+  // Inicializar estado del formulario
+  _foTiposInc = obj?.tipos_incidente ? [...obj.tipos_incidente] : [];
+  _foTiposAcc = obj?.tipos_accion    ? [...obj.tipos_accion]    : [];
+
+  // Categorías seleccionadas (nuevo: array | viejo: string)
+  const selectedCats = obj?.categorias?.length ? obj.categorias
+    : (obj?.categoria ? [obj.categoria] : []);
+
+  // Niveles seleccionados (nuevo: array | viejo: string)
+  const selectedNiveles = obj?.niveles?.length ? obj.niveles
+    : (obj?.nivel ? [obj.nivel] : []);
+
+  const catChks = Object.entries(CAT_OBJ).map(([k,v]) => `
+    <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" class="fo-cat-chk" value="${k}" ${selectedCats.includes(k)?'checked':''}>
+      <span class="tag ${v.tag}" style="margin:0">${v.label}</span>
+    </label>`).join('');
+
+  const todosMarcado = selectedNiveles.length === 0;
+  const nivelChks = ['inicial','primario','secundario','terciario'].map(n => `
+    <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" class="fo-nivel-chk" value="${n}" ${selectedNiveles.includes(n)?'checked':''} onchange="_foNivelChkChange()">
+      <span style="font-size:11px">${n[0].toUpperCase()+n.slice(1)}</span>
+    </label>`).join('');
 
   const selectedIds = obj?.responsable_ids?.length ? obj.responsable_ids
     : (obj?.responsable_id ? [obj.responsable_id] : []);
@@ -415,23 +461,42 @@ async function _abrirFormObj(objId) {
       <span style="font-size:9px;color:var(--txt3)">${u.rol}</span>
     </label>`).join('');
 
-  const prog = obj?.progreso ?? obj?.cumplimiento ?? 0;
   const html = `
-    <div style="display:grid;gap:10px">
+    <div style="display:grid;gap:12px">
       <div><label class="lbl">Nombre *</label>
         <input type="text" id="fo-nombre" value="${obj?.nombre||''}" placeholder="Nombre del objetivo"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><label class="lbl">Categoría</label>
-          <select id="fo-cat" style="width:100%"><option value="">Sin categoría</option>${cats}</select></div>
-        <div><label class="lbl">Nivel</label>
-          <select id="fo-nivel" style="width:100%"><option value="">General</option>${nivelesOpts}</select></div>
+
+      <div>
+        <label class="lbl">Categorías</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">${catChks}</div>
+        <div id="fo-cats-extra" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="fo-cat-nueva" placeholder="Nueva categoría..." style="flex:1;font-size:11px"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();_addCatObj();}">
+          <button type="button" class="btn-s" style="font-size:10px;padding:4px 8px;flex-shrink:0" onclick="_addCatObj()">+ Agregar</button>
+        </div>
       </div>
+
+      <div>
+        <label class="lbl">Nivel</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="checkbox" id="fo-nivel-todos" ${todosMarcado?'checked':''} onchange="_foToggleNivelTodos(this.checked)">
+            <span style="font-size:11px;font-weight:600">Todos</span>
+          </label>
+          ${nivelChks}
+        </div>
+      </div>
+
       <div><label class="lbl">Descripción</label>
         <textarea id="fo-desc" rows="2" placeholder="Contexto...">${obj?.descripcion||''}</textarea></div>
       <div><label class="lbl">Punto de partida</label>
-        <input type="text" id="fo-partida" value="${obj?.punto_de_partida||''}" placeholder="Situación al inicio del objetivo (ej: 15 tardanzas/mes, 30% ausentismo)"></div>
+        <input type="text" id="fo-partida" value="${obj?.punto_de_partida||''}" placeholder="Situación inicial medible (ej: 15 tardanzas/mes, 30% ausentismo)">
+        <div style="font-size:10px;color:var(--txt3);margin-top:3px">Si hay punto de partida, el estado se mide desde el primer período. Sin él, se necesitan dos períodos.</div>
+      </div>
       <div><label class="lbl">Meta / Criterio de éxito</label>
         <textarea id="fo-meta" rows="2" placeholder="¿Qué queremos lograr y cómo lo mediremos?">${obj?.meta_descripcion||obj?.meta||''}</textarea></div>
+
       <div>
         <label class="lbl">Responsables</label>
         <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
@@ -439,18 +504,38 @@ async function _abrirFormObj(objId) {
           <button type="button" class="btn-s" style="font-size:10px;padding:3px 8px" onclick="_selRespRol('preceptor')">Todos preceptores</button>
           <button type="button" class="btn-s" style="font-size:10px;padding:3px 8px" onclick="_selRespRol('')">Desmarcar todos</button>
         </div>
-        <div style="border:1px solid var(--brd);border-radius:var(--rad);max-height:140px;overflow-y:auto;padding:6px 10px">${respChks||'<div style="font-size:11px;color:var(--txt2)">Sin usuarios</div>'}</div>
+        <div style="border:1px solid var(--brd);border-radius:var(--rad);max-height:130px;overflow-y:auto;padding:6px 10px">${respChks||'<div style="font-size:11px;color:var(--txt2)">Sin usuarios</div>'}</div>
       </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><label class="lbl">Fecha inicio</label>
-          ${renderFechaInput('fo-inicio', obj?.fecha_inicio||'')}</div>
-        <div><label class="lbl">Fecha cierre estimada</label>
-          ${renderFechaInput('fo-cierre', obj?.fecha_cierre||'')}</div>
+        <div><label class="lbl">Fecha inicio</label>${renderFechaInput('fo-inicio', obj?.fecha_inicio||'')}</div>
+        <div><label class="lbl">Fecha cierre estimada</label>${renderFechaInput('fo-cierre', obj?.fecha_cierre||'')}</div>
       </div>
-      <div><label class="lbl">Progreso actual (%)</label>
-        <input type="number" id="fo-prog" min="0" max="100" value="${prog}"></div>
+
+      <div>
+        <label class="lbl">Tipos de incidente (opcionales)</label>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:6px">Al registrar un incidente de este objetivo, aparecerán estas opciones. Vacío = tipos estándar.</div>
+        <div id="fo-tipos-inc-list" style="display:flex;flex-wrap:wrap;gap:4px;min-height:20px;margin-bottom:6px"></div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="fo-tipos-inc-input" placeholder="Agregar tipo de incidente..." style="flex:1;font-size:11px"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();_addFoTipoInc();}">
+          <button type="button" class="btn-s" style="font-size:10px;padding:4px 8px;flex-shrink:0" onclick="_addFoTipoInc()">+ Agregar</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="lbl">Tipos de acción tomada (opcionales)</label>
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:6px">Al registrar un incidente, aparecerán estas acciones. Vacío = acciones estándar.</div>
+        <div id="fo-tipos-acc-list" style="display:flex;flex-wrap:wrap;gap:4px;min-height:20px;margin-bottom:6px"></div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="fo-tipos-acc-input" placeholder="Agregar tipo de acción..." style="flex:1;font-size:11px"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();_addFoTipoAcc();}">
+          <button type="button" class="btn-s" style="font-size:10px;padding:4px 8px;flex-shrink:0" onclick="_addFoTipoAcc()">+ Agregar</button>
+        </div>
+      </div>
+
       <div style="background:var(--bg);border-radius:var(--rad);padding:10px 12px">
-        <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Configuración de tendencia</div>
+        <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Configuración de medición</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div><label class="lbl">Frecuencia de corte</label>
             <select id="fo-freq" style="width:100%">
@@ -472,6 +557,8 @@ async function _abrirFormObj(objId) {
     <button class="btn-s" onclick="_cerrarModalObj('modal-form-obj')">Cancelar</button>
     <button class="btn-p" onclick="_guardarFormObj('${objId||''}')">${obj?'Guardar cambios':'Crear objetivo'}</button>`;
   _objModal('modal-form-obj', obj?'Editar objetivo':'Nuevo objetivo', html, btns);
+  _renderFoTiposIncList();
+  _renderFoTiposAccList();
 }
 
 function _selRespRol(rol) {
@@ -480,16 +567,86 @@ function _selRespRol(rol) {
   else { chks.forEach(c => { if (c.dataset.rol === rol) c.checked = true; }); }
 }
 
+function _addCatObj() {
+  const inp = document.getElementById('fo-cat-nueva');
+  const val = inp?.value.trim();
+  if (!val) return;
+  // Evitar duplicados con predefinidas o ya agregadas
+  const existing = [...document.querySelectorAll('.fo-cat-chk')].map(c => c.value);
+  if (existing.includes(val)) { if (inp) inp.value = ''; return; }
+  const cont = document.getElementById('fo-cats-extra');
+  if (!cont) return;
+  const lbl = document.createElement('label');
+  lbl.style.cssText = 'display:flex;align-items:center;gap:5px;cursor:pointer';
+  lbl.innerHTML = `<input type="checkbox" class="fo-cat-chk" value="${val}" checked><span class="tag tgr" style="margin:0">${val}</span>`;
+  cont.appendChild(lbl);
+  if (inp) inp.value = '';
+}
+
+function _foToggleNivelTodos(checked) {
+  document.querySelectorAll('.fo-nivel-chk').forEach(c => c.checked = false);
+}
+function _foNivelChkChange() {
+  const algunos = [...document.querySelectorAll('.fo-nivel-chk')].some(c => c.checked);
+  const todos = document.getElementById('fo-nivel-todos');
+  if (todos) todos.checked = !algunos;
+}
+
+function _renderFoTiposIncList() {
+  const cont = document.getElementById('fo-tipos-inc-list');
+  if (!cont) return;
+  cont.innerHTML = _foTiposInc.map((t, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:3px;background:var(--azul-l);color:var(--azul);padding:3px 8px;border-radius:10px;font-size:10px">
+      ${t}
+      <button onclick="_removeFoTipoInc(${i})" style="background:none;border:none;cursor:pointer;padding:0 0 0 2px;font-size:13px;color:var(--azul);line-height:1">×</button>
+    </span>`).join('');
+}
+function _addFoTipoInc() {
+  const inp = document.getElementById('fo-tipos-inc-input');
+  const val = inp?.value.trim();
+  if (!val || _foTiposInc.includes(val)) { if (inp) inp.value = ''; return; }
+  _foTiposInc.push(val);
+  if (inp) inp.value = '';
+  _renderFoTiposIncList();
+}
+function _removeFoTipoInc(idx) { _foTiposInc.splice(idx, 1); _renderFoTiposIncList(); }
+
+function _renderFoTiposAccList() {
+  const cont = document.getElementById('fo-tipos-acc-list');
+  if (!cont) return;
+  cont.innerHTML = _foTiposAcc.map((t, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:3px;background:var(--verde-l);color:var(--verde);padding:3px 8px;border-radius:10px;font-size:10px">
+      ${t}
+      <button onclick="_removeFoTipoAcc(${i})" style="background:none;border:none;cursor:pointer;padding:0 0 0 2px;font-size:13px;color:var(--verde);line-height:1">×</button>
+    </span>`).join('');
+}
+function _addFoTipoAcc() {
+  const inp = document.getElementById('fo-tipos-acc-input');
+  const val = inp?.value.trim();
+  if (!val || _foTiposAcc.includes(val)) { if (inp) inp.value = ''; return; }
+  _foTiposAcc.push(val);
+  if (inp) inp.value = '';
+  _renderFoTiposAccList();
+}
+function _removeFoTipoAcc(idx) { _foTiposAcc.splice(idx, 1); _renderFoTiposAccList(); }
+
 async function _guardarFormObj(objId) {
   const nombre = document.getElementById('fo-nombre')?.value.trim();
   if (!nombre) { alert('El nombre es obligatorio.'); return; }
   const respChks = [...document.querySelectorAll('.fo-resp-chk:checked')];
   const responsable_ids   = respChks.map(c => c.value);
   const responsable_texto = respChks.map(c => c.dataset.nombre).join(', ') || null;
+
+  const categorias = [...document.querySelectorAll('.fo-cat-chk:checked')].map(c => c.value);
+  const nivelChks  = [...document.querySelectorAll('.fo-nivel-chk:checked')].map(c => c.value);
+  const niveles    = nivelChks; // vacío = Todos
+
   const payload = {
     nombre,
-    categoria:           document.getElementById('fo-cat')?.value    || null,
-    nivel:               document.getElementById('fo-nivel')?.value   || null,
+    categorias:          categorias.length ? categorias : null,
+    categoria:           categorias[0] || null,           // compat backward
+    niveles:             niveles.length ? niveles : null,
+    nivel:               niveles[0] || null,              // compat backward
     descripcion:         document.getElementById('fo-desc')?.value    || null,
     meta_descripcion:    document.getElementById('fo-meta')?.value    || null,
     responsable_ids:     responsable_ids.length ? responsable_ids : null,
@@ -497,7 +654,8 @@ async function _guardarFormObj(objId) {
     punto_de_partida:    document.getElementById('fo-partida')?.value.trim() || null,
     fecha_inicio:        getFechaInput('fo-inicio')                    || null,
     fecha_cierre:        getFechaInput('fo-cierre')                    || null,
-    progreso:            Math.min(100, Math.max(0, parseInt(document.getElementById('fo-prog')?.value)||0)),
+    tipos_incidente:     _foTiposInc.length ? _foTiposInc : null,
+    tipos_accion:        _foTiposAcc.length ? _foTiposAcc : null,
     frecuencia_medicion: document.getElementById('fo-freq')?.value    || 'mensual',
     umbral_mejora:       Math.min(100, Math.max(1, parseInt(document.getElementById('fo-umbral-m')?.value)||10)),
     umbral_riesgo:       Math.min(100, Math.max(1, parseInt(document.getElementById('fo-umbral-r')?.value)||10)),
@@ -550,8 +708,12 @@ async function _abrirFormInc(objId) {
     return `<option value="${cu.id}">${lbl}</option>`;
   }).join('');
 
-  const tiposOpts  = TIPOS_INC.map(t  => `<option value="${t}">${t}</option>`).join('');
-  const accionOpts = ACCIONES_INC.map(a => `<option value="${a}">${a}</option>`).join('');
+  // Usar tipos personalizados del objetivo si existen, si no los estándar
+  const objRef     = _objCache.find(o => o.id === objId);
+  const tiposList  = objRef?.tipos_incidente?.length ? [...objRef.tipos_incidente, 'Otro'] : TIPOS_INC;
+  const accionList = objRef?.tipos_accion?.length    ? [...objRef.tipos_accion, 'Otro']    : ACCIONES_INC;
+  const tiposOpts  = tiposList.map(t  => `<option value="${t}">${t}</option>`).join('');
+  const accionOpts = accionList.map(a => `<option value="${a}">${a}</option>`).join('');
   const hoy = hoyISO();
 
   const html = `
