@@ -14,10 +14,10 @@ const CAT_OBJ = {
   institucional: { label:'Institucional', color:'var(--dorado)', bg:'var(--dor-l)',   tag:'td' },
 };
 const TENDENCIA_OBJ = {
-  mejorando:  { label:'Mejorando',  icon:'↑', color:'var(--verde)' },
-  estable:    { label:'Estable',    icon:'→', color:'var(--ambar)' },
-  empeorando: { label:'Empeorando', icon:'↓', color:'var(--rojo)'  },
-  sin_datos:  { label:'Sin datos',  icon:'—', color:'var(--txt3)'  },
+  mejorando:  { label:'Avanzando',   icon:'↑', color:'var(--verde)' },
+  estable:    { label:'En progreso', icon:'→', color:'var(--azul)'  },
+  empeorando: { label:'En riesgo',   icon:'↓', color:'var(--rojo)'  },
+  sin_datos:  { label:'Estático',    icon:'—', color:'var(--txt3)'  },
 };
 const ESTADO_OBJ = {
   activo:    { label:'Activo',    tag:'tg'  },
@@ -25,6 +25,17 @@ const ESTADO_OBJ = {
   logrado:   { label:'Logrado',   tag:'tp'  },
   archivado: { label:'Archivado', tag:'tgr' },
 };
+
+const TIPOS_INC = [
+  'Tardanza','Ausencia injustificada','Conducta disruptiva',
+  'Conflicto entre pares','Falta de materiales','Incumplimiento de tareas',
+  'Agresión verbal','Agresión física','Uso inadecuado de dispositivos','Otro'
+];
+const ACCIONES_INC = [
+  'Diálogo con el alumno','Llamado de atención','Contacto con familia',
+  'Citación a padres','Acuerdo de convivencia','Amonestación',
+  'Derivación a EOE','Suspensión','Otro'
+];
 
 function _objPuedeEditar() {
   return ['director_general','directivo_nivel','admin','preceptor'].includes(USUARIO_ACTUAL?.rol);
@@ -127,7 +138,7 @@ function _renderCardsObj() {
             </div>
             <div style="font-size:10px;color:var(--txt2);margin-bottom:6px">${obj.responsable_texto||'—'}</div>
             <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt3);margin-bottom:3px">
-              <span style="color:${tnd.color};font-weight:600">${tnd.icon} ${tnd.label}</span>
+              ${obj.tendencia !== 'sin_datos' ? `<span style="color:${tnd.color};font-weight:600">${tnd.icon} ${tnd.label}</span>` : '<span style="color:var(--txt3);font-style:italic">Sin medición aún</span>'}
               <span>${prog}% · ${incCount} incidente${incCount!==1?'s':''}</span>
             </div>
             <div class="bb"><div class="bf" style="width:${prog}%;background:${cat.color}"></div></div>
@@ -205,8 +216,8 @@ async function _rObjDetalle(objId) {
           </div>
           <span style="margin-left:auto;font-size:9px;background:var(--verde-l);color:var(--verde);padding:2px 6px;border-radius:10px;flex-shrink:0">En legajo</span>
         </div>` : ''}
-        ${desc ? `<div style="font-size:11px;color:var(--txt2);margin-bottom:4px;font-style:italic">"${desc}"</div>` : ''}
-        <div style="font-size:11px;color:var(--txt);font-weight:500">${i.accion_tomada}</div>
+        ${desc ? `<span class="tag tp" style="margin-bottom:6px;display:inline-block">${desc}</span>` : ''}
+        <div style="font-size:11px;color:var(--txt);font-weight:500">→ ${i.accion_tomada}</div>
         ${i.medida?`<div style="font-size:10px;color:var(--ambar);margin-top:2px">⚠ Medida: ${i.medida}</div>`:''}
         <div style="font-size:10px;color:var(--txt3);margin-top:3px">${i.reg?.nombre_completo||'—'} · ${formatFechaCorta(i.fecha || i.created_at?.split('T')[0])}</div>
       </div>`}).join('') : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin incidentes registrados.</div>';
@@ -223,6 +234,7 @@ async function _rObjDetalle(objId) {
         <span style="font-size:11px;font-weight:600;color:${tnd.color}">${tnd.icon} ${tnd.label}</span>
       </div>
       ${obj.descripcion?`<div style="font-size:12px;color:var(--txt2);margin-bottom:10px">${obj.descripcion}</div>`:''}
+      ${obj.punto_de_partida?`<div style="font-size:11px;margin-bottom:8px;padding:7px 10px;background:var(--bg);border-radius:var(--rad)"><span style="color:var(--txt3)">Punto de partida:</span> ${obj.punto_de_partida}</div>`:''}
       ${(obj.meta_descripcion||obj.meta)?`<div style="font-size:11px;margin-bottom:10px"><b>Meta:</b> ${obj.meta_descripcion||obj.meta}</div>`:''}
       <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt3);margin-bottom:4px"><span>Progreso</span><span>${prog}%</span></div>
       <div class="bb" style="margin-bottom:10px"><div class="bf" style="width:${prog}%;background:${cat.color}"></div></div>
@@ -275,11 +287,13 @@ async function _rObjDetalle(objId) {
 
 function _renderTendenciaWidget(obj, tendData) {
   if (!tendData) return '';
-  const freqLabel = { semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual' }[obj.frecuencia_medicion || 'mensual'] || 'Mensual';
+  const freqLabels = { diario:'Diario', semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual', trimestral:'Trimestral' };
+  const freqLabel = freqLabels[obj.frecuencia_medicion || 'mensual'] || 'Mensual';
   const tnd       = TENDENCIA_OBJ[tendData.tendencia] || TENDENCIA_OBJ.estable;
   const sinDatos  = tendData.tendencia === 'sin_datos';
   const varPct    = tendData.variacion_pct;
   const varStr    = varPct === null ? '—' : (varPct > 0 ? '+' : '') + varPct + '%';
+  // Menos incidentes = mejor → bajó es verde, subió es rojo
   const varClr    = sinDatos ? 'var(--txt3)'
     : varPct < 0 ? 'var(--verde)'
     : varPct > 0 ? 'var(--rojo)'
@@ -289,14 +303,19 @@ function _renderTendenciaWidget(obj, tendData) {
   const pp = tendData.periodo_anterior || {};
 
   return `
-    <div class="card" style="margin-bottom:12px;border-left:3px solid ${tnd.color}">
+    <div class="card" style="margin-bottom:12px;border-left:3px solid ${sinDatos ? 'var(--brd)' : tnd.color}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700">Medición de tendencia</div>
-        <span style="font-size:10px;color:var(--txt3)">${freqLabel} · umbral ±${obj.umbral_riesgo||10}%</span>
+        <div style="font-size:11px;font-weight:700">Estado del objetivo</div>
+        <span style="font-size:10px;color:var(--txt3)">Corte ${freqLabel.toLowerCase()} · umbral ${obj.umbral_riesgo||10}%</span>
       </div>
       ${sinDatos ? `
-        <div style="font-size:11px;color:var(--txt3);font-style:italic">Sin incidentes en el período anterior — se necesitan datos de al menos dos períodos para calcular la tendencia.</div>
+        <div style="font-size:11px;color:var(--txt3);font-style:italic">
+          El estado aparecerá cuando se complete el primer período de medición con incidentes registrados. Por ahora no hay suficientes datos para comparar.
+        </div>
       ` : `
+        <div style="font-size:11px;color:var(--txt2);margin-bottom:10px">
+          Compara cuántos incidentes hubo en este período versus el anterior. Menos incidentes = objetivo avanzando.
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
           <div style="background:var(--bg);border-radius:var(--rad);padding:8px 10px;text-align:center">
             <div style="font-size:9px;color:var(--txt3);text-transform:uppercase;font-weight:600;letter-spacing:.04em;margin-bottom:2px">Período actual</div>
@@ -409,6 +428,8 @@ async function _abrirFormObj(objId) {
       </div>
       <div><label class="lbl">Descripción</label>
         <textarea id="fo-desc" rows="2" placeholder="Contexto...">${obj?.descripcion||''}</textarea></div>
+      <div><label class="lbl">Punto de partida</label>
+        <input type="text" id="fo-partida" value="${obj?.punto_de_partida||''}" placeholder="Situación al inicio del objetivo (ej: 15 tardanzas/mes, 30% ausentismo)"></div>
       <div><label class="lbl">Meta / Criterio de éxito</label>
         <textarea id="fo-meta" rows="2" placeholder="¿Qué queremos lograr y cómo lo mediremos?">${obj?.meta_descripcion||obj?.meta||''}</textarea></div>
       <div>
@@ -431,18 +452,20 @@ async function _abrirFormObj(objId) {
       <div style="background:var(--bg);border-radius:var(--rad);padding:10px 12px">
         <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Configuración de tendencia</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-          <div><label class="lbl">Frecuencia</label>
+          <div><label class="lbl">Frecuencia de corte</label>
             <select id="fo-freq" style="width:100%">
-              <option value="mensual"   ${(obj?.frecuencia_medicion||'mensual')==='mensual'  ?'selected':''}>Mensual</option>
-              <option value="quincenal" ${obj?.frecuencia_medicion==='quincenal'?'selected':''}>Quincenal</option>
-              <option value="semanal"   ${obj?.frecuencia_medicion==='semanal'  ?'selected':''}>Semanal</option>
+              <option value="diario"    ${obj?.frecuencia_medicion==='diario'    ?'selected':''}>Diario</option>
+              <option value="semanal"   ${obj?.frecuencia_medicion==='semanal'   ?'selected':''}>Semanal</option>
+              <option value="quincenal" ${obj?.frecuencia_medicion==='quincenal' ?'selected':''}>Quincenal</option>
+              <option value="mensual"   ${(obj?.frecuencia_medicion||'mensual')==='mensual'?'selected':''}>Mensual</option>
+              <option value="trimestral"${obj?.frecuencia_medicion==='trimestral'?'selected':''}>Trimestral</option>
             </select></div>
           <div><label class="lbl">Umbral mejora (%)</label>
             <input type="number" id="fo-umbral-m" min="1" max="100" value="${obj?.umbral_mejora??10}" style="width:100%"></div>
           <div><label class="lbl">Umbral riesgo (%)</label>
             <input type="number" id="fo-umbral-r" min="1" max="100" value="${obj?.umbral_riesgo??10}" style="width:100%"></div>
         </div>
-        <div style="font-size:10px;color:var(--txt3);margin-top:6px">Bajó más del umbral mejora → verde · Subió más del umbral riesgo → rojo</div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:6px">Si los incidentes bajan más del umbral → Avanzando (verde) · Si suben más → En riesgo (rojo)</div>
       </div>
     </div>`;
   const btns = `
@@ -471,6 +494,7 @@ async function _guardarFormObj(objId) {
     meta_descripcion:    document.getElementById('fo-meta')?.value    || null,
     responsable_ids:     responsable_ids.length ? responsable_ids : null,
     responsable_texto,
+    punto_de_partida:    document.getElementById('fo-partida')?.value.trim() || null,
     fecha_inicio:        getFechaInput('fo-inicio')                    || null,
     fecha_cierre:        getFechaInput('fo-cierre')                    || null,
     progreso:            Math.min(100, Math.max(0, parseInt(document.getElementById('fo-prog')?.value)||0)),
@@ -506,17 +530,39 @@ async function _abrirFormInc(objId) {
   const cursosRes = await sb.from('cursos').select('id,nombre,division,anio,nivel')
     .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
     .or('activo.is.null,activo.eq.true').order('nivel').order('anio');
-  const cursoOpts = (cursosRes.data||[]).map(cu => {
+  const todosCursos = cursosRes.data || [];
+  window._incTodosCursos = todosCursos;
+
+  // Filtrar por nivel del usuario si aplica
+  let cursosIniciales = todosCursos;
+  if (USUARIO_ACTUAL?.nivel) {
+    cursosIniciales = todosCursos.filter(c => c.nivel === USUARIO_ACTUAL.nivel);
+  }
+
+  // Mostrar filtro de nivel solo si hay múltiples niveles y el usuario no tiene nivel fijo
+  const nivelesDisp = [...new Set(todosCursos.map(c => c.nivel).filter(Boolean))];
+  const mostrarNivel = nivelesDisp.length > 1 && !USUARIO_ACTUAL?.nivel;
+  const nivelesOpts = nivelesDisp.map(n =>
+    `<option value="${n}">${n[0].toUpperCase()+n.slice(1)}</option>`).join('');
+
+  const cursoOpts = cursosIniciales.map(cu => {
     const lbl = [cu.anio ? cu.anio+'°' : '', cu.nombre, cu.division||''].filter(Boolean).join(' ');
     return `<option value="${cu.id}">${lbl}</option>`;
   }).join('');
 
+  const tiposOpts  = TIPOS_INC.map(t  => `<option value="${t}">${t}</option>`).join('');
+  const accionOpts = ACCIONES_INC.map(a => `<option value="${a}">${a}</option>`).join('');
   const hoy = hoyISO();
+
   const html = `
     <div style="display:grid;gap:10px">
       <div style="background:var(--verde-l);border:1px solid rgba(34,153,87,0.2);border-radius:var(--rad);padding:10px 12px">
         <div style="font-size:11px;font-weight:700;color:var(--verde);margin-bottom:8px">Alumno involucrado</div>
         <div style="display:grid;gap:6px">
+          ${mostrarNivel ? `<div><label class="lbl">Nivel</label>
+            <select id="inc-nivel" onchange="_incFiltraCursos(this.value)">
+              <option value="">Todos los niveles</option>${nivelesOpts}
+            </select></div>` : ''}
           <div><label class="lbl">Curso</label>
             <select id="inc-curso" onchange="_incCargaAlumnos(this.value)">
               <option value="">— Seleccioná un curso —</option>${cursoOpts}
@@ -532,12 +578,22 @@ async function _abrirFormInc(objId) {
           Sin alumno específico (incidente institucional)
         </label>
       </div>
-      <div><label class="lbl">Descripción del incidente *</label>
-        <textarea id="inc-desc" rows="3" placeholder="Describí qué ocurrió, cuándo y en qué contexto..."></textarea></div>
-      <div><label class="lbl">Acción tomada *</label>
-        <textarea id="inc-accion" rows="2" placeholder="¿Qué se hizo al respecto?"></textarea></div>
+      <div>
+        <label class="lbl">Tipo de incidente *</label>
+        <select id="inc-tipo" onchange="_incToggleTipoOtro(this.value)">
+          <option value="">— Seleccioná el tipo —</option>${tiposOpts}
+        </select>
+        <input type="text" id="inc-tipo-otro" placeholder="Describí el incidente..." style="display:none;margin-top:6px">
+      </div>
+      <div>
+        <label class="lbl">Acción tomada *</label>
+        <select id="inc-accion-sel" onchange="_incToggleAccionOtro(this.value)">
+          <option value="">— Seleccioná la acción —</option>${accionOpts}
+        </select>
+        <input type="text" id="inc-accion-otro" placeholder="Describí la acción tomada..." style="display:none;margin-top:6px">
+      </div>
       <div><label class="lbl">Medida adoptada (opcional)</label>
-        <input type="text" id="inc-medida" placeholder="Ej: Llamado a padres, amonestación, acuerdo de convivencia..."></div>
+        <input type="text" id="inc-medida" placeholder="Ej: Amonestación, acuerdo de convivencia..."></div>
       <div><label class="lbl">Fecha</label>
         ${renderFechaInput('inc-fecha', hoy, {wrapStyle:'max-width:360px'})}</div>
     </div>`;
@@ -556,6 +612,32 @@ function _incToggleSinAlumno(sinAlumno) {
   const sel = document.getElementById('inc-alumno');
   if (sel)  sel.disabled = sinAlumno;
   if (info) info.style.display = 'none';
+}
+
+function _incFiltraCursos(nivel) {
+  const cursos = window._incTodosCursos || [];
+  const filtrados = nivel ? cursos.filter(c => c.nivel === nivel) : cursos;
+  const sel = document.getElementById('inc-curso');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Seleccioná un curso —</option>' +
+    filtrados.map(cu => {
+      const lbl = [cu.anio ? cu.anio+'°' : '', cu.nombre, cu.division||''].filter(Boolean).join(' ');
+      return `<option value="${cu.id}">${lbl}</option>`;
+    }).join('');
+  const alumSel = document.getElementById('inc-alumno');
+  if (alumSel) alumSel.innerHTML = '<option value="">— Primero seleccioná el curso —</option>';
+  const info = document.getElementById('inc-alumno-info');
+  if (info) info.style.display = 'none';
+}
+
+function _incToggleTipoOtro(val) {
+  const el = document.getElementById('inc-tipo-otro');
+  if (el) el.style.display = val === 'Otro' ? '' : 'none';
+}
+
+function _incToggleAccionOtro(val) {
+  const el = document.getElementById('inc-accion-otro');
+  if (el) el.style.display = val === 'Otro' ? '' : 'none';
 }
 
 async function _incCargaAlumnos(cursoId) {
@@ -597,11 +679,6 @@ function _incMostrarInfo(sel) {
 }
 
 async function _guardarInc(objId) {
-  const desc   = document.getElementById('inc-desc')?.value.trim();
-  const accion = document.getElementById('inc-accion')?.value.trim();
-  if (!desc)   { alert('La descripción del incidente es obligatoria.'); return; }
-  if (!accion) { alert('La acción tomada es obligatoria.'); return; }
-
   const sinAlumno = document.getElementById('inc-sin-alumno')?.checked;
   const alumnoId  = sinAlumno ? null : (document.getElementById('inc-alumno')?.value || null);
   const cursoId   = sinAlumno ? null : (document.getElementById('inc-curso')?.value  || null);
@@ -611,13 +688,25 @@ async function _guardarInc(objId) {
     return;
   }
 
-  // Obtener texto del alumno seleccionado desde la opción del select
+  const tipoSel = document.getElementById('inc-tipo')?.value;
+  if (!tipoSel) { alert('Seleccioná el tipo de incidente.'); return; }
+  const desc = tipoSel === 'Otro'
+    ? (document.getElementById('inc-tipo-otro')?.value.trim() || '')
+    : tipoSel;
+  if (!desc) { alert('Describí el tipo de incidente.'); return; }
+
+  const accionSel = document.getElementById('inc-accion-sel')?.value;
+  if (!accionSel) { alert('Seleccioná la acción tomada.'); return; }
+  const accion = accionSel === 'Otro'
+    ? (document.getElementById('inc-accion-otro')?.value.trim() || '')
+    : accionSel;
+  if (!accion) { alert('Describí la acción tomada.'); return; }
+
   let descAlumno = null, cursoTexto = null;
   if (!sinAlumno) {
     const selAl = document.getElementById('inc-alumno');
     const opt   = selAl?.options[selAl.selectedIndex];
     if (opt && opt.value) descAlumno = opt.dataset.nombre || opt.text;
-
     if (cursoId) {
       const selCu = document.getElementById('inc-curso');
       const optCu = selCu?.options[selCu.selectedIndex];
@@ -646,7 +735,6 @@ async function _guardarInc(objId) {
     return;
   }
 
-  // Actualizar cache inmediatamente para que las métricas del card reflejen el nuevo total
   const objEnCache = _objCache.find(o => o.id === objId);
   if (objEnCache) {
     const incsActuales = objEnCache.incs?.[0]?.count ?? 0;
@@ -655,7 +743,6 @@ async function _guardarInc(objId) {
 
   await _actualizarTendenciaObj(objId);
 
-  // Registrar automáticamente en el legajo del alumno (observaciones)
   if (alumnoId) {
     const objRef = _objCache.find(o => o.id === objId);
     const partes = [`[Objetivo: ${objRef?.nombre || 'Institucional'}]`, desc];
@@ -671,10 +758,7 @@ async function _guardarInc(objId) {
   }
 
   _cerrarModalObj('modal-form-inc');
-
-  // Mostrar toast de confirmación si hay alumno vinculado
   if (descAlumno) _toastObj(`✓ Incidente registrado · Anotado en el legajo de ${descAlumno}`);
-
   await rObj();
 }
 
