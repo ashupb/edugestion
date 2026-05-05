@@ -259,7 +259,7 @@ async function rDashDirector() {
 
   const hoy = sem.hoy;
 
-  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes, asistHoyRes, noLectRes] = await Promise.all([
+  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes, asistHoyRes, noLectRes, cursosRes] = await Promise.all([
     sb.from('problematicas')
       .select('id,urgencia,alumno:alumnos(curso:cursos(nivel))')
       .eq('institucion_id', instId)
@@ -285,8 +285,9 @@ async function rDashDirector() {
       .eq('institucion_id', instId).or('activo.is.null,activo.eq.true'),
     sb.from('usuarios').select('id', { count:'exact', head:true })
       .eq('institucion_id', instId).eq('rol', 'docente').or('activo.is.null,activo.eq.true'),
-    sb.from('asistencia').select('estado').eq('fecha', hoy).is('hora_clase', null),
+    sb.from('asistencia').select('estado,curso_id').eq('fecha', hoy).is('hora_clase', null),
     sb.from('dias_no_lectivos').select('fecha').eq('institucion_id', instId),
+    sb.from('cursos').select('id', { count:'exact', head:true }).eq('institucion_id', instId),
   ]);
 
   window._diasNoLectivos = new Set((noLectRes.data || []).map(r => r.fecha));
@@ -302,12 +303,15 @@ async function rDashDirector() {
   checkAlertasProb(instId).catch(() => {});
 
   const asistHoy = asistHoyRes.data || [];
+  const totalCursos = cursosRes.count ?? 0;
   const asistContador = { presente:0, ausente:0, media_falta:0, tardanza:0, justificado:0 };
   asistHoy.forEach(a => { if (asistContador[a.estado] !== undefined) asistContador[a.estado]++; });
   const pctAsist = totalAlumnos > 0
     ? Math.min(100, Math.round((asistContador.presente + asistContador.tardanza + asistContador.media_falta) / totalAlumnos * 100))
     : 0;
   const _asistClr = pctAsist >= 85 ? 'var(--verde)' : pctAsist >= 70 ? 'var(--ambar)' : 'var(--rojo)';
+  const cursosConListaDir = new Set(asistHoy.map(a => a.curso_id).filter(Boolean)).size;
+  const listasPendDir = esFechaHabil(hoy) ? Math.max(0, totalCursos - cursosConListaDir) : 0;
   const asistCardHTML = !esFechaHabil(hoy) ? `
     <div class="card" style="margin-bottom:14px;border-left:4px solid var(--gris)">
       <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Día no lectivo</div>
@@ -325,10 +329,11 @@ async function rDashDirector() {
         <span style="color:var(--rojo)">❌ ${asistContador.ausente} ausentes</span>
         ${asistContador.media_falta+asistContador.tardanza > 0 ? `<span style="color:var(--ambar)">🕐 ${asistContador.media_falta+asistContador.tardanza} tardanzas/MF</span>` : ''}
         ${asistContador.justificado > 0 ? `<span style="color:var(--azul)">📋 ${asistContador.justificado} justificados</span>` : ''}
+        ${listasPendDir > 0 ? `<span style="color:var(--ambar)">⏳ ${listasPendDir} ${listasPendDir === 1 ? 'lista pendiente' : 'listas pendientes'}</span>` : `<span style="color:var(--verde)">✓ Todas las listas tomadas</span>`}
       </div>
     </div>` : `
     <div class="card" style="margin-bottom:14px;border-left:4px solid var(--gris)">
-      <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Sin registros todavía</div>
+      <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Sin registros todavía${totalCursos > 0 ? ` · ${totalCursos} listas pendientes` : ''}</div>
     </div>`;
 
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
@@ -385,7 +390,7 @@ async function rDashDirectivo() {
     .select('id').eq('institucion_id', instId).eq('nivel', nivel);
   const cursoIdsNivel = (_cursosNivel || []).map(c => c.id);
 
-  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes] = await Promise.all([
+  const [probRes, objRes, eventosRes, respRes, alertasRes, alumnosRes, docentesRes, suplenciasRes, asistHoyRes] = await Promise.all([
     sb.from('problematicas')
       .select('id,urgencia,alumno:alumnos(curso:cursos(nivel))')
       .eq('institucion_id', instId)
@@ -412,19 +417,58 @@ async function rDashDirectivo() {
           .in('curso_id', cursoIdsNivel).or('activo.is.null,activo.eq.true')
       : Promise.resolve({ count: 0 }),
     cursoIdsNivel.length
-      ? sb.from('asignaciones').select('docente_id').in('curso_id', cursoIdsNivel)
+      ? sb.from('asignaciones').select('docente_id, doc:usuarios!docente_id(activo)').in('curso_id', cursoIdsNivel)
+      : Promise.resolve({ data: [] }),
+    sb.from('usuarios').select('id', { count:'exact', head:true })
+      .eq('institucion_id', instId).eq('nivel', nivel).eq('en_licencia', true),
+    cursoIdsNivel.length
+      ? sb.from('asistencia').select('estado,curso_id').in('curso_id', cursoIdsNivel).eq('fecha', sem.hoy).is('hora_clase', null)
       : Promise.resolve({ data: [] }),
   ]);
 
-  const probs         = probRes.data    || [];
-  const objetivos     = objRes.data     || [];
-  const eventosSem    = eventosRes.data || [];
-  const pendientes    = (respRes.data   || []).filter(r => r.eventos_institucionales);
-  const alertas       = alertasRes.error ? [] : (alertasRes.data || []);
-  const totalAlumnos  = alumnosRes.count  ?? 0;
-  const totalDocentes = new Set((docentesRes.data || []).map(a => a.docente_id).filter(Boolean)).size;
-  const probsNivel    = probs.filter(p => p.alumno?.curso?.nivel === nivel);
+  const probs          = probRes.data    || [];
+  const objetivos      = objRes.data     || [];
+  const eventosSem     = eventosRes.data || [];
+  const pendientes     = (respRes.data   || []).filter(r => r.eventos_institucionales);
+  const alertas        = alertasRes.error ? [] : (alertasRes.data || []);
+  const totalAlumnos   = alumnosRes.count  ?? 0;
+  const totalDocentes  = new Set((docentesRes.data || []).filter(a => a.doc?.activo !== false).map(a => a.docente_id).filter(Boolean)).size;
+  const totalSuplencias = suplenciasRes.count ?? 0;
+  const probsNivel     = probs.filter(p => p.alumno?.curso?.nivel === nivel);
   checkAlertasProb(instId).catch(() => {});
+
+  const asistHoyDir = asistHoyRes.data || [];
+  const asistCnt = { presente:0, ausente:0, media_falta:0, tardanza:0, justificado:0 };
+  asistHoyDir.forEach(a => { if (asistCnt[a.estado] !== undefined) asistCnt[a.estado]++; });
+  const pctAsistDir = totalAlumnos > 0
+    ? Math.min(100, Math.round((asistCnt.presente + asistCnt.tardanza + asistCnt.media_falta) / totalAlumnos * 100))
+    : 0;
+  const asistClrDir = pctAsistDir >= 85 ? 'var(--verde)' : pctAsistDir >= 70 ? 'var(--ambar)' : 'var(--rojo)';
+  const cursosConListaDir = new Set(asistHoyDir.map(a => a.curso_id).filter(Boolean)).size;
+  const listasPendDir = esFechaHabil(sem.hoy) ? Math.max(0, cursoIdsNivel.length - cursosConListaDir) : 0;
+  const asistCardDir = !esFechaHabil(sem.hoy) ? `
+    <div class="card" style="margin-bottom:14px;border-left:4px solid var(--gris)">
+      <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Día no lectivo</div>
+    </div>` : asistHoyDir.length > 0 ? `
+    <div class="card" style="margin-bottom:14px;border-left:4px solid ${asistClrDir}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600">📋 Asistencia hoy</div>
+        <div style="font-size:16px;font-weight:700;color:${asistClrDir}">${pctAsistDir}%</div>
+      </div>
+      <div style="background:var(--gris-l);border-radius:4px;height:6px;margin-bottom:10px">
+        <div style="width:${pctAsistDir}%;background:${asistClrDir};height:6px;border-radius:4px;transition:width .3s"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px">
+        <span style="color:var(--verde)">✅ ${asistCnt.presente} presentes</span>
+        <span style="color:var(--rojo)">❌ ${asistCnt.ausente} ausentes</span>
+        ${asistCnt.media_falta+asistCnt.tardanza > 0 ? `<span style="color:var(--ambar)">🕐 ${asistCnt.media_falta+asistCnt.tardanza} tardanzas/MF</span>` : ''}
+        ${asistCnt.justificado > 0 ? `<span style="color:var(--azul)">📋 ${asistCnt.justificado} justificados</span>` : ''}
+        ${listasPendDir > 0 ? `<span style="color:var(--ambar)">⏳ ${listasPendDir} ${listasPendDir === 1 ? 'lista pendiente' : 'listas pendientes'}</span>` : `<span style="color:var(--verde)">✓ Todas las listas tomadas</span>`}
+      </div>
+    </div>` : `
+    <div class="card" style="margin-bottom:14px;border-left:4px solid var(--gris)">
+      <div style="font-size:12px;color:var(--txt2)">📋 Asistencia hoy — Sin registros todavía${cursoIdsNivel.length > 0 ? ` · ${cursoIdsNivel.length} listas pendientes` : ''}</div>
+    </div>`;
 
   const nc = NIVEL_CONFIG[nivel] || NIVEL_CONFIG.todos;
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
@@ -433,11 +477,13 @@ async function rDashDirectivo() {
     <div class="pg-t">${saludo}, ${apellido} 👋</div>
     <div class="pg-s" style="margin-bottom:14px">${_fechaStr()} · <span style="color:${nc.color};font-weight:600">${nc.label}</span></div>
 
+    ${asistCardDir}
+
     <div class="metrics m4" style="margin-bottom:14px">
       <div class="mc" style="cursor:pointer" onclick="goPage('leg')"><div class="mc-v">${totalAlumnos}</div><div class="mc-l">ALUMNOS ACTIVOS</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
-      <div class="mc"><div class="mc-v">${totalDocentes}</div><div class="mc-l">DOCENTES</div></div>
+      <div class="mc"><div class="mc-v">${totalDocentes}</div><div class="mc-l">DOCENTES ACTIVOS</div></div>
+      <div class="mc"><div class="mc-v" style="color:${totalSuplencias > 0 ? 'var(--ambar)' : 'var(--txt2)'}">${totalSuplencias}</div><div class="mc-l">SUPLENCIAS</div></div>
       <div class="mc" style="cursor:pointer" onclick="goPage('prob')"><div class="mc-v" style="color:var(--rojo)">${probsNivel.length}</div><div class="mc-l">SITUACIONES</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
-      <div class="mc" style="cursor:pointer" onclick="goPage('prob')"><div class="mc-v" style="color:var(--ambar)">${alertas.length}</div><div class="mc-l">ALERTAS</div><div style="font-size:9px;color:var(--verde);margin-top:6px;font-weight:600">Ir →</div></div>
     </div>
 
     ${renderProximasActividades(eventosSem, sem.hoy, nivel)}
