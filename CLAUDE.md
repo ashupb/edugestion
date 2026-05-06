@@ -86,6 +86,8 @@ El rol `eoe` tiene acceso multi-nivel (igual que `director_general`) en asistenc
 | `intervenciones` | Bitácora de seguimiento de problematicas |
 | `notificaciones` | Notificaciones por usuario (`usuario_id`, `tipo`, `referencia_tabla`, `referencia_id`, `leida`, `mensaje`) |
 | `derivaciones` | Derivaciones EOE (`alumno_id`, `problematica_id?`, `tipo_servicio`, `institucion_destino`, `profesional_destino?`, `fecha_derivacion`, `motivo`, `estado`, `respuesta?`, `creado_por`). Acceso: EOE (escritura), director/directivo (lectura). SQL: `migrations/derivaciones.sql` |
+| `reuniones` | Reuniones institucionales y actividades EOE. **Cols nuevas** (`migrations/actividades_eoe.sql`): `tipo_actividad` ('charla'/'taller'/'entrevista_grupal'/'otra'), `problematica_id?`, `destinatarios_tipo` ('curso'/'alumnos_individuales'), `destinatarios_ids UUID[]`, `destinatarios_texto`. Filas con `tipo_actividad IS NOT NULL` = actividades EOE gestionadas desde `rEOE()`. |
+| `reunion_invitados` | Invitados a reuniones/actividades (`reunion_id`, `usuario_id`, `estado`: 'pendiente'/'aceptada'/'rechazada') |
 | `eventos_institucionales` | Eventos de agenda con `nivel`, `convocados_ids[]`, `convocatoria_grupos[]` |
 | `config_asistencia` | Configuración por nivel e institución — ver columnas abajo |
 | `tipos_justificacion` | Tipos de justificación de ausencia |

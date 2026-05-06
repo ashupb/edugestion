@@ -915,7 +915,7 @@ async function _guardarInc(objId) {
       alumno_id:      alumnoId,
       registrado_por: USUARIO_ACTUAL.id,
       texto:          partes.join(' — '),
-      privada:        false,
+      confidencial:   false,
     });
   }
 
@@ -1047,44 +1047,364 @@ async function _importarTardanzas(objId) {
 async function rEOE() {
   showLoading('eoe');
   try {
-    const {data,error}=await sb.from('problematicas')
-      .select(`*, alumno:alumnos(nombre,apellido,curso:cursos(nombre,division))`)
-      .eq('institucion_id',USUARIO_ACTUAL.institucion_id)
-      .neq('estado','resuelta')
-      .in('tipo',['emocional','familiar','salud'])
-      .order('urgencia',{ascending:false});
-    if (error) throw error;
+    const [probRes, actRes] = await Promise.all([
+      sb.from('problematicas')
+        .select(`*, alumno:alumnos(nombre,apellido,curso:cursos(nombre,division))`)
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .neq('estado', 'resuelta')
+        .in('tipo', ['emocional', 'familiar', 'salud'])
+        .order('urgencia', { ascending: false }),
+      sb.from('reuniones')
+        .select(`*, prob:problematicas(descripcion)`)
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .not('tipo_actividad', 'is', null)
+        .order('fecha', { ascending: false })
+        .limit(30),
+    ]);
+    if (probRes.error) throw probRes.error;
 
-    const c=document.getElementById('page-eoe');
-    c.innerHTML=`
-      <div class="pg-t">Equipo de orientación</div>
-      <div class="pg-s">Casos con seguimiento especializado · ${INSTITUCION_ACTUAL?.nombre||''}</div>
-      <div class="metrics m2">
-        <div class="mc"><div class="mc-v" style="color:var(--rojo)">${(data||[]).filter(p=>p.urgencia==='alta').length}</div><div class="mc-l">Urgentes</div></div>
-        <div class="mc"><div class="mc-v" style="color:var(--ambar)">${(data||[]).filter(p=>p.urgencia==='media').length}</div><div class="mc-l">Seguimiento</div></div>
+    const casos      = probRes.data || [];
+    const actividades = actRes.error ? [] : (actRes.data || []);
+    const hoy        = hoyISO();
+    const esEOE      = USUARIO_ACTUAL.rol === 'eoe';
+    const puedeVer   = ['eoe', 'director_general', 'directivo_nivel'].includes(USUARIO_ACTUAL.rol);
+
+    const c = document.getElementById('page-eoe');
+    c.innerHTML = `
+      <div class="pg-t">Panel EOE</div>
+      <div class="pg-s">Equipo de Orientación Escolar · ${INSTITUCION_ACTUAL?.nombre || ''}</div>
+      <div class="metrics m2" style="margin-bottom:14px">
+        <div class="mc"><div class="mc-v" style="color:var(--rojo)">${casos.filter(p => p.urgencia === 'alta').length}</div><div class="mc-l">Urgentes</div></div>
+        <div class="mc"><div class="mc-v" style="color:var(--ambar)">${casos.filter(p => p.urgencia === 'media').length}</div><div class="mc-l">Seguimiento</div></div>
       </div>
-      ${!(data?.length)?'<div class="empty-state">🧠<br>Sin casos EOE activos</div>':
-        data.map(p=>{
-          const ini=(p.alumno?.apellido?.[0]||'?')+(p.alumno?.nombre?.[0]||'');
-          const nom=p.alumno?`${p.alumno.apellido}, ${p.alumno.nombre}`:'—';
-          const cur=p.alumno?.curso?`${p.alumno.curso.nombre}${p.alumno.curso.division||''}`:'—';
-          return `
-            <div class="caso-c u${p.urgencia?.[0]||'m'}" style="cursor:pointer" onclick="goPage('prob')">
-              <div class="caso-top">
-                <div class="av av32" style="background:var(--azul-l);color:var(--azul)">${ini}</div>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:12px;font-weight:600">${nom}</div>
-                  <div style="font-size:10px;color:var(--txt2)">${cur} · ${labelTipo(p.tipo)} · ${tiempoDesde(p.created_at)}</div>
-                  <div style="margin-top:4px;display:flex;gap:4px">
-                    <span class="tag ${p.urgencia==='alta'?'tr':'ta'}">Urgencia ${p.urgencia}</span>
-                    <span class="tag td">Confidencial</span>
+
+      <div class="sec-lb">Casos en seguimiento (${casos.length})</div>
+      ${!casos.length
+        ? '<div class="empty-state" style="margin-bottom:16px">🧠<br>Sin casos EOE activos</div>'
+        : casos.map(p => {
+            const ini = (p.alumno?.apellido?.[0] || '?') + (p.alumno?.nombre?.[0] || '');
+            const nom = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
+            const cur = p.alumno?.curso ? `${p.alumno.curso.nombre}${p.alumno.curso.division || ''}` : '—';
+            return `
+              <div class="caso-c u${p.urgencia?.[0] || 'm'}" style="cursor:pointer;margin-bottom:8px" onclick="goPage('prob')">
+                <div class="caso-top">
+                  <div class="av av32" style="background:var(--azul-l);color:var(--azul)">${ini}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600">${nom}</div>
+                    <div style="font-size:10px;color:var(--txt2)">${cur} · ${labelTipo(p.tipo)} · ${tiempoDesde(p.created_at)}</div>
+                    <div style="margin-top:4px;display:flex;gap:4px">
+                      <span class="tag ${p.urgencia === 'alta' ? 'tr' : 'ta'}">Urgencia ${p.urgencia}</span>
+                      <span class="tag td">Confidencial</span>
+                    </div>
                   </div>
+                  <span style="font-size:11px;color:var(--txt2)">›</span>
                 </div>
-                <span style="font-size:11px;color:var(--txt2)">›</span>
-              </div>
-            </div>`;
-        }).join('')}`;
-  } catch(e){showError('eoe','Error: '+e.message);}
+              </div>`;
+          }).join('')}
+
+      ${puedeVer ? `
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--brd)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div class="sec-lb" style="margin:0">Actividades EOE (${actividades.length})</div>
+          ${esEOE ? `<button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva actividad</button>` : ''}
+        </div>
+        ${!actividades.length
+          ? '<div class="empty-state">📋<br>Sin actividades registradas</div>'
+          : actividades.map(a => _renderActCard(a, hoy)).join('')}
+      </div>` : ''}`;
+  } catch(e) { showError('eoe', 'Error: ' + e.message); }
+}
+
+// ─── EOE Actividades ────────────────────────────────
+
+const _ACT_TIPO_LABEL = {
+  charla:            'Charla',
+  taller:            'Taller',
+  entrevista_grupal: 'Entrevista grupal',
+  otra:              'Otra',
+};
+
+let _actAlumnosSel = [];
+let _actBusqTimer  = null;
+let _actAlumnosMap = {};
+
+function _renderActCard(a, hoy) {
+  const esPasada  = a.fecha < hoy;
+  const tipoLabel = _ACT_TIPO_LABEL[a.tipo_actividad] || a.tipo_actividad;
+  const hora      = a.hora ? a.hora.slice(0, 5) : '';
+  const probDesc  = a.prob?.descripcion;
+  return `
+    <div class="card" style="margin-bottom:8px${esPasada ? ';opacity:.75' : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div style="font-size:12px;font-weight:600;line-height:1.3;flex:1">${a.titulo}</div>
+        <span class="tag ${esPasada ? 'tgr' : 'tg'}" style="flex-shrink:0;margin-left:8px">${esPasada ? 'Realizada' : 'Próxima'}</span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">
+        <span class="tag tp">${tipoLabel}</span>
+        ${probDesc ? `<span class="tag td" style="font-size:9px">Prob: ${probDesc.slice(0, 30)}${probDesc.length > 30 ? '…' : ''}</span>` : ''}
+      </div>
+      <div style="font-size:10px;color:var(--txt2)">
+        ${formatFechaCorta(a.fecha)}${hora ? ' · ' + hora : ''}${a.lugar ? ' · ' + a.lugar : ''}
+      </div>
+      ${a.destinatarios_texto ? `<div style="font-size:10px;color:var(--txt3);margin-top:2px">Destinatarios: ${a.destinatarios_texto}</div>` : ''}
+      ${a.descripcion ? `<div style="font-size:11px;color:var(--txt2);margin-top:4px">${a.descripcion}</div>` : ''}
+    </div>`;
+}
+
+async function _abrirFormActividad() {
+  _actAlumnosSel = [];
+  _actAlumnosMap = {};
+
+  const [cursosRes, probsRes, usrsRes] = await Promise.all([
+    sb.from('cursos').select('id,nombre,division,anio,nivel')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .or('activo.is.null,activo.eq.true').order('nivel').order('anio'),
+    sb.from('problematicas').select('id,descripcion,alumno:alumnos(apellido,nombre)')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .neq('estado', 'resuelta').order('created_at', { ascending: false }).limit(50),
+    sb.from('usuarios').select('id,nombre_completo,rol')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .or('activo.is.null,activo.eq.true')
+      .neq('id', USUARIO_ACTUAL.id).order('rol').order('nombre_completo'),
+  ]);
+
+  const cursos = cursosRes.data || [];
+  const probs  = probsRes.data  || [];
+  const usrs   = usrsRes.data   || [];
+  window._actTodosCursos = cursos;
+
+  const nivelesDisp  = [...new Set(cursos.map(c => c.nivel).filter(Boolean))];
+  const mostrarNivel = nivelesDisp.length > 1;
+  const nivelesOpts  = nivelesDisp.map(n =>
+    `<option value="${n}">${n[0].toUpperCase() + n.slice(1)}</option>`).join('');
+  const cursoOpts = cursos.map(cu => {
+    const lbl = [cu.anio ? cu.anio + '°' : '', cu.nombre, cu.division || ''].filter(Boolean).join(' ');
+    return `<option value="${cu.id}" data-nivel="${cu.nivel}">${lbl} · ${cu.nivel}</option>`;
+  }).join('');
+  const probsOpts = probs.map(p => {
+    const nom  = p.alumno ? ` — ${p.alumno.apellido}, ${p.alumno.nombre}` : '';
+    const desc = (p.descripcion || 'Sin descripción').slice(0, 40);
+    return `<option value="${p.id}">${desc}${nom}</option>`;
+  }).join('');
+  const invOpts = usrs.map(u => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;padding:3px 0">
+      <input type="checkbox" class="act-inv-chk" value="${u.id}">
+      <span style="flex:1">${u.nombre_completo}</span>
+      <span style="font-size:9px;color:var(--txt3)">${u.rol}</span>
+    </label>`).join('');
+
+  const html = `
+    <div style="display:grid;gap:12px">
+      <div><label class="lbl">Título *</label>
+        <input type="text" id="act-titulo" placeholder="Ej: Taller sobre vínculos saludables"></div>
+
+      <div><label class="lbl">Tipo *</label>
+        <select id="act-tipo" style="width:100%">
+          <option value="">— Seleccioná el tipo —</option>
+          <option value="charla">Charla</option>
+          <option value="taller">Taller</option>
+          <option value="entrevista_grupal">Entrevista grupal</option>
+          <option value="otra">Otra</option>
+        </select></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label class="lbl">Fecha *</label>${renderFechaInput('act-fecha', hoyISO())}</div>
+        <div><label class="lbl">Hora</label>
+          <input type="time" id="act-hora" style="width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:8px;background:var(--surf);color:var(--txt)">
+        </div>
+      </div>
+
+      <div>
+        <label class="lbl">Destinatarios</label>
+        <div style="display:flex;gap:14px;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-dest-tipo" value="curso" checked onchange="_actDestTipoChange('curso')"> Curso completo
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-dest-tipo" value="alumnos_individuales" onchange="_actDestTipoChange('alumnos_individuales')"> Alumnos individuales
+          </label>
+        </div>
+        <div id="act-dest-curso">
+          ${mostrarNivel ? `<div style="margin-bottom:6px"><select id="act-nivel" onchange="_actNivelChange(this.value)" style="width:100%">
+            <option value="">Todos los niveles</option>${nivelesOpts}
+          </select></div>` : ''}
+          <select id="act-curso" style="width:100%">
+            <option value="">— Seleccioná un curso (opcional) —</option>${cursoOpts}
+          </select>
+        </div>
+        <div id="act-dest-alumnos" style="display:none">
+          <input type="text" id="act-busq-alum" placeholder="Buscar alumno por apellido..."
+            style="margin-bottom:6px;width:100%" oninput="_debounceActAlumno()">
+          <div id="act-busq-res" style="margin-bottom:6px"></div>
+          <div id="act-alumnos-chips" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px"></div>
+        </div>
+      </div>
+
+      <div><label class="lbl">Problemática relacionada (opcional)</label>
+        <select id="act-prob" style="width:100%">
+          <option value="">— Sin problemática vinculada —</option>${probsOpts}
+        </select></div>
+
+      <div>
+        <label class="lbl">Invitados de la institución</label>
+        <div style="border:1px solid var(--brd);border-radius:var(--rad);max-height:120px;overflow-y:auto;padding:6px 10px">
+          ${invOpts || '<div style="font-size:11px;color:var(--txt2)">Sin usuarios disponibles</div>'}
+        </div>
+      </div>
+
+      <div><label class="lbl">Descripción / Objetivos</label>
+        <textarea id="act-desc" rows="3" placeholder="Objetivos de la actividad, metodología prevista..."></textarea></div>
+    </div>`;
+
+  const btns = `
+    <button class="btn-s" onclick="_cerrarModalObj('modal-act-eoe')">Cancelar</button>
+    <button class="btn-p" onclick="_guardarActividad()">Guardar actividad</button>`;
+  _objModal('modal-act-eoe', 'Nueva actividad EOE', html, btns);
+}
+
+function _actDestTipoChange(tipo) {
+  document.getElementById('act-dest-curso').style.display   = tipo === 'curso' ? '' : 'none';
+  document.getElementById('act-dest-alumnos').style.display = tipo === 'alumnos_individuales' ? '' : 'none';
+}
+
+function _actNivelChange(nivel) {
+  const sel       = document.getElementById('act-curso');
+  if (!sel) return;
+  const todos     = window._actTodosCursos || [];
+  const filtrados = nivel ? todos.filter(c => c.nivel === nivel) : todos;
+  sel.innerHTML   = '<option value="">— Seleccioná un curso (opcional) —</option>' +
+    filtrados.map(cu => {
+      const lbl = [cu.anio ? cu.anio + '°' : '', cu.nombre, cu.division || ''].filter(Boolean).join(' ');
+      return `<option value="${cu.id}" data-nivel="${cu.nivel}">${lbl} · ${cu.nivel}</option>`;
+    }).join('');
+}
+
+function _debounceActAlumno() {
+  clearTimeout(_actBusqTimer);
+  _actBusqTimer = setTimeout(_buscarActAlumno, 350);
+}
+
+async function _buscarActAlumno() {
+  const q   = document.getElementById('act-busq-alum')?.value.trim();
+  const res = document.getElementById('act-busq-res');
+  if (!res) return;
+  if (!q || q.length < 2) { res.innerHTML = ''; return; }
+
+  const { data } = await sb.from('alumnos')
+    .select('id,nombre,apellido,curso:cursos(nombre,division,anio,nivel)')
+    .or('activo.is.null,activo.eq.true')
+    .ilike('apellido', `%${q}%`).limit(8).order('apellido');
+
+  if (!data?.length) {
+    res.innerHTML = '<div style="font-size:11px;color:var(--txt2);padding:4px 0">Sin resultados</div>';
+    return;
+  }
+  data.forEach(a => { _actAlumnosMap[a.id] = `${a.apellido}, ${a.nombre}`; });
+  res.innerHTML = data.map(a => {
+    const nombre  = `${a.apellido}, ${a.nombre}`;
+    const cur     = a.curso ? [a.curso.anio ? a.curso.anio + '°' : '', a.curso.nombre, a.curso.division || ''].filter(Boolean).join(' ') : '';
+    const yaSelec = _actAlumnosSel.some(s => s.id === a.id);
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:var(--rad);background:var(--bg);margin-bottom:3px">
+        <div>
+          <div style="font-size:11px;font-weight:600">${nombre}</div>
+          ${cur ? `<div style="font-size:10px;color:var(--txt3)">${cur}</div>` : ''}
+        </div>
+        ${yaSelec
+          ? '<span style="font-size:10px;color:var(--txt3)">Ya seleccionado</span>'
+          : `<button class="btn-s" style="font-size:10px;padding:3px 8px" onclick="_addActAlumno('${a.id}')">+ Agregar</button>`}
+      </div>`;
+  }).join('');
+}
+
+function _addActAlumno(id) {
+  const nombre = _actAlumnosMap[id];
+  if (!nombre || _actAlumnosSel.some(s => s.id === id)) return;
+  _actAlumnosSel.push({ id, nombre });
+  _renderActAlumnosChips();
+  _buscarActAlumno();
+}
+
+function _removeActAlumno(id) {
+  _actAlumnosSel = _actAlumnosSel.filter(s => s.id !== id);
+  _renderActAlumnosChips();
+}
+
+function _renderActAlumnosChips() {
+  const cont = document.getElementById('act-alumnos-chips');
+  if (!cont) return;
+  cont.innerHTML = _actAlumnosSel.map(s =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--azul-l);color:var(--azul);padding:3px 8px;border-radius:10px;font-size:10px">
+      ${s.nombre}
+      <button onclick="_removeActAlumno('${s.id}')" style="background:none;border:none;cursor:pointer;padding:0;font-size:14px;color:var(--azul);line-height:1">×</button>
+    </span>`).join('');
+}
+
+async function _guardarActividad() {
+  const titulo = document.getElementById('act-titulo')?.value.trim();
+  const tipo   = document.getElementById('act-tipo')?.value;
+  const fecha  = getFechaInput('act-fecha');
+  if (!titulo) { alert('El título es obligatorio.'); return; }
+  if (!tipo)   { alert('Seleccioná el tipo de actividad.'); return; }
+  if (!fecha)  { alert('La fecha es obligatoria.'); return; }
+
+  const destTipo = document.querySelector('[name="act-dest-tipo"]:checked')?.value || 'curso';
+  let destinatarios_ids   = null;
+  let destinatarios_texto = null;
+
+  if (destTipo === 'curso') {
+    const cursoId = document.getElementById('act-curso')?.value || null;
+    if (cursoId) {
+      const cursoData = (window._actTodosCursos || []).find(c => c.id === cursoId);
+      destinatarios_ids = [cursoId];
+      if (cursoData) {
+        const lbl = [cursoData.anio ? cursoData.anio + '°' : '', cursoData.nombre, cursoData.division || ''].filter(Boolean).join(' ');
+        destinatarios_texto = `${lbl} · ${cursoData.nivel}`;
+      }
+    }
+  } else {
+    if (!_actAlumnosSel.length) { alert('Seleccioná al menos un alumno.'); return; }
+    destinatarios_ids   = _actAlumnosSel.map(s => s.id);
+    destinatarios_texto = `${_actAlumnosSel.length} alumno${_actAlumnosSel.length > 1 ? 's' : ''}`;
+  }
+
+  const probId = document.getElementById('act-prob')?.value  || null;
+  const hora   = document.getElementById('act-hora')?.value  || null;
+  const desc   = document.getElementById('act-desc')?.value.trim() || null;
+
+  const btn = document.querySelector('#modal-act-eoe .btn-p');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  const { data: nueva, error } = await sb.from('reuniones').insert({
+    institucion_id:     USUARIO_ACTUAL.institucion_id,
+    creado_por:         USUARIO_ACTUAL.id,
+    titulo,
+    fecha,
+    hora:               hora || null,
+    descripcion:        desc,
+    tipo_actividad:     tipo,
+    problematica_id:    probId || null,
+    destinatarios_tipo: destTipo,
+    destinatarios_ids,
+    destinatarios_texto,
+  }).select().single();
+
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar actividad'; }
+    alert('Error al guardar: ' + error.message);
+    return;
+  }
+
+  const invChks = [...document.querySelectorAll('.act-inv-chk:checked')];
+  if (invChks.length) {
+    await sb.from('reunion_invitados').insert(
+      invChks.map(c => ({ reunion_id: nueva.id, usuario_id: c.value, estado: 'pendiente' }))
+    );
+  }
+
+  _cerrarModalObj('modal-act-eoe');
+  _toastObj('✓ Actividad registrada correctamente');
+  await rEOE();
 }
 
 // =====================================================
