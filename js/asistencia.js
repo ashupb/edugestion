@@ -45,10 +45,9 @@ async function rAsist() {
   window._diasNoLectivos     = new Set((noLectRes.data || []).map(r => r.fecha));
   window._diasNoLectivosData = noLectRes.data || [];
 
-  if (rol === 'director_general' || rol === 'directivo_nivel') await rAsistDirector();
+  if (rol === 'director_general' || rol === 'directivo_nivel' || rol === 'eoe') await rAsistDirector();
   else if (rol === 'docente')   await rAsistDocente();
   else if (rol === 'preceptor') await rAsistPreceptor();
-  else if (rol === 'eoe')       await rAsistEOE();
 
   inyectarEstilosAsist();
 
@@ -131,7 +130,20 @@ async function rAsistDirector() {
 
   c.innerHTML = `
     <div class="pg-t">Asistencia</div>
-    <div class="pg-s">${formatFechaLatam(hoy)} · Estado de listas</div>
+    <div class="pg-s">${formatFechaLatam(hoy)} · ${USUARIO_ACTUAL.rol === 'eoe' ? 'Vista institucional · Solo lectura' : 'Estado de listas'}</div>
+    ${USUARIO_ACTUAL.rol === 'eoe' ? `
+    <div style="margin-bottom:14px">
+      <div style="position:relative">
+        <input type="text" id="eoe-asist-search" placeholder="Buscar alumno por nombre..."
+          style="width:100%;padding:9px 34px 9px 12px;font-size:12px;box-sizing:border-box"
+          oninput="_debounceAsistEOE(this.value)">
+        <button id="eoe-asist-clear" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;font-size:16px;color:var(--txt2);line-height:1"
+          onclick="_limpiarBusquedaAsistEOE()">×</button>
+      </div>
+      <div id="eoe-asist-drop" style="position:relative;z-index:20"></div>
+      <div id="eoe-asist-alumno"></div>
+    </div>` : ''}
     ${contCardsHTML}
     ${!hoyHabil ? `
     <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:8px">
@@ -1398,6 +1410,8 @@ async function verificarAlertas(alumnoIds, instId, nivel) {
           institucion_id: instId, alumno_id: alumnoId,
           tipo_alerta: tipoAlerta, total_faltas: totalFaltas,
         });
+        // Notificar al preceptor del curso y a los secretarios
+        _notificarAlertaInasistencia(alumnoId, instId, tipoAlerta, totalFaltas).catch(() => {});
       } else if (existente.total_faltas !== totalFaltas) {
         await sb.from('alertas_asistencia')
           .update({ total_faltas: totalFaltas })
@@ -1851,4 +1865,137 @@ async function guardarAsistIntensif(periodoId) {
 
   alert(`✅ Asistencia guardada para ${registros.length} alumno(s).`);
   mostrarPeriodosIntensif();
+}
+
+// ═══════════════════════════════════════════════════════
+// NOTIFICACIÓN ALERTAS — TAREA 8
+// ═══════════════════════════════════════════════════════
+async function _notificarAlertaInasistencia(alumnoId, instId, tipoAlerta, totalFaltas) {
+  // Obtener datos del alumno (nombre + curso)
+  const { data: al } = await sb.from('alumnos')
+    .select('nombre,apellido,curso_id,cursos(nivel)')
+    .eq('id', alumnoId).single();
+  if (!al) return;
+
+  const nombreAlumno = `${al.apellido}, ${al.nombre}`;
+  const cursoId      = al.curso_id;
+  const nivel        = al.cursos?.nivel;
+  const umbralLabel  = ['','Alerta 1','Alerta 2','Alerta 3','Riesgo regularidad'][tipoAlerta] || `Alerta ${tipoAlerta}`;
+  const mensaje      = `${nombreAlumno} alcanzó ${totalFaltas} falta(s) — ${umbralLabel}`;
+
+  // Verificar si ya existe notificación de este umbral para este alumno
+  const { data: yaNotif } = await sb.from('notificaciones')
+    .select('id')
+    .eq('referencia_tabla', 'alumnos')
+    .eq('referencia_id', alumnoId)
+    .eq('tipo', `alerta_inasistencia_${tipoAlerta}`)
+    .limit(1);
+  if (yaNotif?.length) return; // ya notificado este umbral
+
+  // Destinatarios: preceptores del curso + secretarios
+  const [precsRes, secrsRes] = await Promise.all([
+    cursoId
+      ? sb.from('usuarios').select('id')
+          .eq('institucion_id', instId).eq('rol', 'preceptor')
+          .or(`nivel.eq.${nivel},cursos_ids.cs.{${cursoId}}`)
+      : Promise.resolve({ data: [] }),
+    sb.from('usuarios').select('id')
+      .eq('institucion_id', instId).eq('rol', 'secretario'),
+  ]);
+
+  const destinatarios = [
+    ...(precsRes.data  || []).map(u => u.id),
+    ...(secrsRes.data  || []).map(u => u.id),
+  ];
+
+  if (!destinatarios.length) return;
+
+  const notifs = destinatarios.map(uid => ({
+    usuario_id:       uid,
+    tipo:             `alerta_inasistencia_${tipoAlerta}`,
+    referencia_tabla: 'alumnos',
+    referencia_id:    alumnoId,
+    mensaje,
+    leida:            false,
+  }));
+
+  await sb.from('notificaciones').insert(notifs);
+}
+
+// ═══════════════════════════════════════════════════════
+// BUSCADOR EOE — asistencia
+// ═══════════════════════════════════════════════════════
+let _asistEOETimer = null;
+
+function _debounceAsistEOE(q) {
+  clearTimeout(_asistEOETimer);
+  const clearBtn = document.getElementById('eoe-asist-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+  if (!q.trim()) {
+    const drop = document.getElementById('eoe-asist-drop');
+    if (drop) drop.innerHTML = '';
+    return;
+  }
+  _asistEOETimer = setTimeout(() => _buscarAlumnoAsistEOE(q.trim()), 400);
+}
+
+async function _buscarAlumnoAsistEOE(q) {
+  const drop   = document.getElementById('eoe-asist-drop');
+  if (!drop) return;
+  drop.innerHTML = '<div style="padding:6px 12px;font-size:11px;color:var(--txt2)">Buscando...</div>';
+
+  const { data } = await sb.from('alumnos')
+    .select('id,nombre,apellido,cursos(nombre,division,nivel)')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('activo', true)
+    .or(`nombre.ilike.%${q}%,apellido.ilike.%${q}%`)
+    .limit(8);
+
+  if (!data?.length) {
+    drop.innerHTML = '<div style="padding:6px 12px;font-size:11px;color:var(--txt2)">Sin resultados.</div>';
+    return;
+  }
+
+  drop.innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden;margin-top:4px">
+      ${data.map(al => {
+        const cu  = al.cursos;
+        const cur = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '';
+        return `
+          <div style="padding:9px 12px;border-bottom:1px solid var(--brd);cursor:pointer;font-size:12px"
+            onmouseover="this.style.background='var(--surf2)'" onmouseout="this.style.background=''"
+            onclick="_verAlumnoAsistEOE('${al.id}','${al.apellido}, ${al.nombre}')">
+            <span style="font-weight:600">${al.apellido}, ${al.nombre}</span>
+            ${cur ? `<span style="color:var(--txt2);font-size:10px;margin-left:6px">${cur}</span>` : ''}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+async function _verAlumnoAsistEOE(alumnoId, nombre) {
+  const drop = document.getElementById('eoe-asist-drop');
+  if (drop) drop.innerHTML = '';
+  const inp  = document.getElementById('eoe-asist-search');
+  if (inp)   inp.value = nombre;
+  const clr  = document.getElementById('eoe-asist-clear');
+  if (clr)   clr.style.display = 'block';
+
+  const panel = document.getElementById('eoe-asist-alumno');
+  if (!panel) return;
+  panel.innerHTML = '<div class="loading-state small"><div class="spinner"></div></div>';
+
+  await verAlumnoAsist(alumnoId);
+  // verAlumnoAsist ya reemplaza el innerHTML del page — restaurar buscador
+}
+
+function _limpiarBusquedaAsistEOE() {
+  const inp = document.getElementById('eoe-asist-search');
+  if (inp) inp.value = '';
+  const drop = document.getElementById('eoe-asist-drop');
+  if (drop) drop.innerHTML = '';
+  const clr  = document.getElementById('eoe-asist-clear');
+  if (clr)   clr.style.display = 'none';
+  const panel = document.getElementById('eoe-asist-alumno');
+  if (panel) panel.innerHTML = '';
+  rAsist();
 }

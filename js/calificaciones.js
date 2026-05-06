@@ -1188,6 +1188,18 @@ async function rNotasDirectivo() {
   c.innerHTML = `
     <div class="pg-t">Calificaciones</div>
     <div class="pg-s">${rol === 'preceptor' ? 'Preceptoría' : 'Vista institucional'} · Solo lectura</div>
+    ${rol === 'eoe' ? `
+    <div style="margin-bottom:14px">
+      <div style="position:relative">
+        <input type="text" id="eoe-notas-search" placeholder="Buscar alumno por nombre..."
+          style="width:100%;padding:9px 34px 9px 12px;font-size:12px;box-sizing:border-box"
+          oninput="_debounceNotasEOE(this.value)">
+        <button id="eoe-notas-clear" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;font-size:16px;color:var(--txt2);line-height:1"
+          onclick="_limpiarBusquedaNotasEOE()">×</button>
+      </div>
+      <div id="eoe-notas-drop" style="position:relative;z-index:20"></div>
+    </div>` : ''}
     ${rol === 'preceptor' ? `<div id="preceptor-cierre-resumen">
       <div style="text-align:center;padding:12px;color:var(--txt3);font-size:11px">
         <div class="spinner" style="margin:0 auto 8px"></div>Cargando estado de cierres...
@@ -1220,7 +1232,7 @@ async function rNotasDirectivo() {
         <div class="spinner" style="margin:0 auto 8px"></div>Verificando...
       </div>
     </div>
-    ${rol !== 'preceptor' ? `
+    ${rol !== 'preceptor' && rol !== 'eoe' ? `
     <div class="sec-lb" style="margin-top:18px">Gestión del ciclo lectivo</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       <button class="btn-s" onclick="_cerrarCuatrimestreTrayectoria(1)" style="font-size:11px">
@@ -2539,6 +2551,78 @@ async function _resolverAlertaAcad(alertaId, btn) {
     return;
   }
   document.getElementById(`alerta-ac-${alertaId}`)?.remove();
+}
+
+// ═══════════════════════════════════════════════════════
+// BUSCADOR EOE — calificaciones
+// ═══════════════════════════════════════════════════════
+let _notasEOETimer = null;
+
+function _debounceNotasEOE(q) {
+  clearTimeout(_notasEOETimer);
+  const clr = document.getElementById('eoe-notas-clear');
+  if (clr) clr.style.display = q ? 'block' : 'none';
+  if (!q.trim()) {
+    const drop = document.getElementById('eoe-notas-drop');
+    if (drop) drop.innerHTML = '';
+    return;
+  }
+  _notasEOETimer = setTimeout(() => _buscarAlumnoNotasEOE(q.trim()), 400);
+}
+
+async function _buscarAlumnoNotasEOE(q) {
+  const drop = document.getElementById('eoe-notas-drop');
+  if (!drop) return;
+  drop.innerHTML = '<div style="padding:6px 12px;font-size:11px;color:var(--txt2)">Buscando...</div>';
+
+  const { data } = await sb.from('alumnos')
+    .select('id,nombre,apellido,curso_id,cursos(id,nombre,division,nivel)')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('activo', true)
+    .or(`nombre.ilike.%${q}%,apellido.ilike.%${q}%`)
+    .limit(8);
+
+  if (!data?.length) {
+    drop.innerHTML = '<div style="padding:6px 12px;font-size:11px;color:var(--txt2)">Sin resultados.</div>';
+    return;
+  }
+
+  drop.innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden;margin-top:4px">
+      ${data.map(al => {
+        const cu  = al.cursos;
+        const cur = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '';
+        return `
+          <div style="padding:9px 12px;border-bottom:1px solid var(--brd);cursor:pointer;font-size:12px"
+            onmouseover="this.style.background='var(--surf2)'" onmouseout="this.style.background=''"
+            onclick="_verAlumnoNotasEOE('${al.id}','${al.apellido}, ${al.nombre}','${cu?.id || ''}','${cu?.nivel || ''}')">
+            <span style="font-weight:600">${al.apellido}, ${al.nombre}</span>
+            ${cur ? `<span style="color:var(--txt2);font-size:10px;margin-left:6px">${cur}</span>` : ''}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+async function _verAlumnoNotasEOE(alumnoId, nombre, cursoId, nivel) {
+  const drop = document.getElementById('eoe-notas-drop');
+  if (drop) drop.innerHTML = '';
+  const inp  = document.getElementById('eoe-notas-search');
+  if (inp)   inp.value = nombre;
+  const clr  = document.getElementById('eoe-notas-clear');
+  if (clr)   clr.style.display = 'block';
+
+  // Navega al alumno en modo solo lectura
+  verAlumnoNotas(alumnoId, cursoId, null, null);
+}
+
+function _limpiarBusquedaNotasEOE() {
+  const inp = document.getElementById('eoe-notas-search');
+  if (inp) inp.value = '';
+  const drop = document.getElementById('eoe-notas-drop');
+  if (drop) drop.innerHTML = '';
+  const clr  = document.getElementById('eoe-notas-clear');
+  if (clr)   clr.style.display = 'none';
+  rNotas();
 }
 
 // ─── UTILIDADES ───────────────────────────────────────

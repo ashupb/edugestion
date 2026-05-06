@@ -64,6 +64,8 @@ El nav lateral (`nav.js`) y bottom nav mobile (`main.js`) se configuran por rol 
 
 Los usuarios `docente` y `preceptor` tienen acceso a asistencia y calificaciones solo para sus cursos asignados. Las asignaciones de docente están en la tabla `asignaciones` (columnas: `docente_id`, `curso_id`, `materia_id`, `anio_lectivo`) — **no** en `docente_cursos`.
 
+El rol `eoe` tiene acceso multi-nivel (igual que `director_general`) en asistencia y calificaciones, pero en modo **solo lectura** (sin botones de guardar/gestión del ciclo lectivo). En problemáticas puede agregar intervenciones tipificadas (`_EOE_TIPOS_INTERV`) pero NO puede cerrar/reabrir casos (`probPermisos().cerrar === false` para EOE). Cuando el tipo es "Derivación", el formulario embebe campos de derivación y guarda simultáneamente en `intervenciones` y `derivaciones`. En legajos puede ver y crear derivaciones (tab "Derivaciones" visible solo para EOE y directivos).
+
 ## Base de datos — tablas clave
 
 | Tabla | Descripción |
@@ -82,7 +84,8 @@ Los usuarios `docente` y `preceptor` tienen acceso a asistencia y calificaciones
 | `problematicas` | Situaciones problemáticas con soporte grupal (`modalidad`, `problematica_madre_id`) |
 | `problematica_alumnos` | Alumnos de una problematica grupal/curso (`problematica_id`, `alumno_id`) |
 | `intervenciones` | Bitácora de seguimiento de problematicas |
-| `notificaciones` | Notificaciones por usuario (`usuario_id`, `tipo`, `referencia_tabla`, `referencia_id`, `leida`) |
+| `notificaciones` | Notificaciones por usuario (`usuario_id`, `tipo`, `referencia_tabla`, `referencia_id`, `leida`, `mensaje`) |
+| `derivaciones` | Derivaciones EOE (`alumno_id`, `problematica_id?`, `tipo_servicio`, `institucion_destino`, `profesional_destino?`, `fecha_derivacion`, `motivo`, `estado`, `respuesta?`, `creado_por`). Acceso: EOE (escritura), director/directivo (lectura). SQL: `migrations/derivaciones.sql` |
 | `eventos_institucionales` | Eventos de agenda con `nivel`, `convocados_ids[]`, `convocatoria_grupos[]` |
 | `config_asistencia` | Configuración por nivel e institución — ver columnas abajo |
 | `tipos_justificacion` | Tipos de justificación de ausencia |

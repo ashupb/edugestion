@@ -263,7 +263,9 @@ function _renderLegAlumnos() {
 }
 
 // ── VISTA 4: LEGAJO INDIVIDUAL (TABS) ─────────────────
-const LEG_TABS = [
+const _ROLES_VER_DERIVACIONES = ['eoe','director_general','directivo_nivel'];
+
+const LEG_TABS_BASE = [
   { id:'datos',         label:'Datos' },
   { id:'contactos',     label:'Contactos' },
   { id:'academico',     label:'Académico' },
@@ -275,12 +277,23 @@ const LEG_TABS = [
   { id:'observaciones', label:'Notas' },
 ];
 
+function _buildLegTabs() {
+  const tabs = [...LEG_TABS_BASE];
+  if (_ROLES_VER_DERIVACIONES.includes(USUARIO_ACTUAL?.rol)) {
+    tabs.push({ id:'derivaciones', label:'Derivaciones' });
+  }
+  return tabs;
+}
+
+let LEG_TABS = _buildLegTabs();
+
 async function abrirLegajoAlumno(alumnoId) {
   const alumno = _legAlumnosCache.find(a => a.id === alumnoId);
   if (!alumno) return;
   _legAlumnoSel = alumno;
   _legTab = 0;
   _legVista = 'legajo';
+  LEG_TABS = _buildLegTabs();
 
   const c  = document.getElementById('page-leg');
   const nc = nivCol(_legCursoSel?.nivel);
@@ -344,6 +357,7 @@ async function _cargarTabLeg(idx) {
     objetivos:     _tabObjetivos,
     eoe:           _tabEOE,
     observaciones: _tabObservaciones,
+    derivaciones:  _tabDerivaciones,
   };
   const fn = fns[LEG_TABS[idx].id];
   if (fn) await fn(el);
@@ -775,12 +789,12 @@ async function _tabObservaciones(c) {
   const p = legPermisos();
   try {
     const { data, error } = await sb.from('observaciones_legajo')
-      .select('id,texto,privada,created_at,registrado_por')
+      .select('id,texto,confidencial,created_at,registrado_por')
       .eq('alumno_id', _legAlumnoSel.id)
       .order('created_at', { ascending: false });
     if (error) throw error;
 
-    const lista = (data || []).filter(o => !o.privada || p.verObsPrivadas);
+    const lista = (data || []).filter(o => !o.confidencial || p.verObsPrivadas);
     const usersMap = await _fetchUserNames(lista.map(o => o.registrado_por));
 
     const canEdit = legPermisos().agregarObservaciones;
@@ -789,7 +803,7 @@ async function _tabObservaciones(c) {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <div style="font-size:10px;color:var(--txt3)">${usersMap[o.registrado_por] || '—'} · ${tiempoDesde(o.created_at)}</div>
           <div style="display:flex;gap:6px;align-items:center">
-            ${o.privada ? '<span class="tag td" style="font-size:9px">Privada</span>' : ''}
+            ${o.confidencial ? '<span class="tag td" style="font-size:9px">Confidencial</span>' : ''}
             ${canEdit && o.registrado_por === USUARIO_ACTUAL.id
               ? `<button class="btn-ghost" style="font-size:10px;padding:2px 6px" onclick="_editarObs('${o.id}','${(o.texto||'').replace(/'/g,"\\'")}')">Editar</button>`
               : ''}
@@ -832,7 +846,7 @@ function _mostrarFormObs() {
     <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
       <textarea id="obs-texto" rows="3" placeholder="Escribí tu observación..."></textarea>
       ${p.marcarPrivada ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt2);margin-top:8px">
-        <input type="checkbox" id="obs-privada"> Solo visible para EOE y Dirección
+        <input type="checkbox" id="obs-privada"> Observación confidencial (solo visible para directivos y EOE)
       </label>` : ''}
       <div class="acc" style="margin-top:10px">
         <button class="btn-p" style="font-size:11px" onclick="_guardarObservacion('${_legAlumnoSel?.id}')">Guardar</button>
@@ -877,7 +891,7 @@ async function _guardarObservacion(alumnoId) {
     alumno_id:      alumnoId,
     registrado_por: USUARIO_ACTUAL.id,
     texto,
-    privada: document.getElementById('obs-privada')?.checked || false,
+    confidencial: document.getElementById('obs-privada')?.checked || false,
   });
   if (error) { alert('Error: ' + error.message); return; }
   await _tabObservaciones(document.getElementById('leg-tab-contenido'));
@@ -1021,7 +1035,7 @@ async function _generarResumenIA(alumnoId) {
     if (eoeRes.error) console.error('[IA] eoe:', eoeRes.error);
 
     const obsRes = await sb.from('observaciones_legajo')
-      .select('texto,privada,created_at')
+      .select('texto,confidencial,created_at')
       .eq('alumno_id', alumnoId)
       .order('created_at', { ascending: false })
       .limit(5);
@@ -1072,7 +1086,7 @@ async function _generarResumenIA(alumnoId) {
       calificaciones:      resumenNotas,
       situaciones_activas: todasSituaciones,
       intervenciones_eoe:  (eoeRes.data || []).map(e => `${e.tipo || 'Intervención'}: ${e.descripcion} (${e.fecha})`),
-      observaciones:       (obsRes.data || []).filter(o => !o.privada).map(o => o.texto),
+      observaciones:       (obsRes.data || []).filter(o => !o.confidencial).map(o => o.texto),
     };
 
     const resultado = await llamarIA('sintesis_legajo', payload);
@@ -1099,6 +1113,117 @@ async function _generarResumenIA(alumnoId) {
       btn.style.display = 'flex';
     }
   }
+}
+
+// ── TAB: DERIVACIONES ────────────────────────────────
+async function _tabDerivaciones(c) {
+  const esEOE = USUARIO_ACTUAL.rol === 'eoe';
+  const alumnoId = _legAlumnoSel?.id;
+
+  const { data, error } = await sb.from('derivaciones')
+    .select('id,tipo_servicio,institucion_destino,profesional_destino,fecha_derivacion,motivo,estado,respuesta,fecha_respuesta,creado_por')
+    .eq('alumno_id', alumnoId)
+    .order('fecha_derivacion', { ascending: false });
+
+  const TIPO_SRV = {
+    salud_mental:'Salud mental', hospital:'Hospital', trabajo_social:'Trabajo social',
+    justicia:'Justicia', educacion_especial:'Ed. especial', otro:'Otro',
+  };
+  const ESTADO_CLS = { pendiente:'ta', en_seguimiento:'tp', con_respuesta:'tg', cerrada:'td' };
+  const ESTADO_LBL = { pendiente:'Pendiente', en_seguimiento:'En seguimiento', con_respuesta:'Con respuesta', cerrada:'Cerrada' };
+
+  const lista = (data || []);
+  const rows  = lista.length
+    ? lista.map(d => `
+      <div class="card" style="padding:12px 14px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
+          <div>
+            <div style="font-size:12px;font-weight:600">${TIPO_SRV[d.tipo_servicio] || d.tipo_servicio}</div>
+            <div style="font-size:11px;color:var(--txt2)">${d.institucion_destino}${d.profesional_destino ? ' · ' + d.profesional_destino : ''}</div>
+          </div>
+          <span class="tag ${ESTADO_CLS[d.estado] || 'td'}" style="font-size:9px;flex-shrink:0">${ESTADO_LBL[d.estado] || d.estado}</span>
+        </div>
+        <div style="font-size:10px;color:var(--txt2);margin-bottom:4px">${formatFechaLatam(d.fecha_derivacion)} · Motivo: ${d.motivo}</div>
+        ${d.respuesta ? `<div style="font-size:10px;padding:6px 10px;background:var(--verde-l);border-radius:var(--rad);color:var(--verde)">
+          Respuesta (${d.fecha_respuesta ? formatFechaLatam(d.fecha_respuesta) : '—'}): ${d.respuesta}
+        </div>` : ''}
+        ${esEOE && d.estado !== 'cerrada' ? `
+        <div style="margin-top:8px;border-top:1px solid var(--brd);padding-top:8px">
+          <button class="btn-s" style="font-size:10px" onclick="_actualizarDerivacion('${d.id}')">
+            Registrar respuesta
+          </button>
+        </div>` : ''}
+      </div>`)
+    .join('')
+    : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin derivaciones registradas.</div>';
+
+  c.innerHTML = `
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="sec-lb" style="margin:0">Derivaciones</div>
+        ${esEOE ? `<button class="btn-p" style="font-size:11px" onclick="_mostrarFormDerivLeg('${alumnoId}')">+ Nueva derivación</button>` : ''}
+      </div>
+      ${rows}
+      <div id="form-deriv-leg"></div>
+    </div>`;
+}
+
+function _mostrarFormDerivLeg(alumnoId) {
+  const fc = document.getElementById('form-deriv-leg');
+  if (!fc) return;
+  if (fc.innerHTML) { fc.innerHTML = ''; return; }
+  fc.innerHTML = `
+    <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
+      <div style="font-size:11px;font-weight:600;margin-bottom:10px">Nueva derivación</div>
+      <select id="deriv-tipo" style="margin-bottom:6px;font-size:11px">
+        <option value="salud_mental">Salud mental</option>
+        <option value="hospital">Hospital</option>
+        <option value="trabajo_social">Trabajo social</option>
+        <option value="justicia">Justicia</option>
+        <option value="educacion_especial">Educación especial</option>
+        <option value="otro">Otro</option>
+      </select>
+      <input type="text" id="deriv-inst" placeholder="Institución/servicio destino *" style="margin-bottom:6px;font-size:11px">
+      <input type="text" id="deriv-prof" placeholder="Profesional (opcional)" style="margin-bottom:6px;font-size:11px">
+      <input type="date" id="deriv-fecha" value="${hoyISO()}" style="margin-bottom:6px;font-size:11px">
+      <textarea id="deriv-motivo" rows="2" placeholder="Motivo de la derivación *" style="margin-bottom:6px;font-size:11px"></textarea>
+      <div class="acc">
+        <button class="btn-p" style="font-size:11px" onclick="_guardarDerivLeg('${alumnoId}')">Guardar</button>
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('form-deriv-leg').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarDerivLeg(alumnoId) {
+  const inst   = document.getElementById('deriv-inst')?.value.trim();
+  const motivo = document.getElementById('deriv-motivo')?.value.trim();
+  if (!inst || !motivo) { alert('Institución/servicio destino y motivo son obligatorios.'); return; }
+  const { error } = await sb.from('derivaciones').insert({
+    institucion_id:      USUARIO_ACTUAL.institucion_id,
+    alumno_id:           alumnoId,
+    problematica_id:     null,
+    tipo_servicio:       document.getElementById('deriv-tipo')?.value || 'otro',
+    institucion_destino: inst,
+    profesional_destino: document.getElementById('deriv-prof')?.value.trim() || null,
+    fecha_derivacion:    document.getElementById('deriv-fecha')?.value || hoyISO(),
+    motivo,
+    creado_por:          USUARIO_ACTUAL.id,
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  await _tabDerivaciones(document.getElementById('leg-tab-contenido'));
+}
+
+async function _actualizarDerivacion(derivId) {
+  const respuesta = prompt('Registrá la respuesta recibida:');
+  if (!respuesta?.trim()) return;
+  const nuevoEstado = confirm('¿Marcar como cerrada?') ? 'cerrada' : 'con_respuesta';
+  await sb.from('derivaciones').update({
+    respuesta:       respuesta.trim(),
+    fecha_respuesta: hoyISO(),
+    estado:          nuevoEstado,
+    updated_at:      new Date().toISOString(),
+  }).eq('id', derivId);
+  await _tabDerivaciones(document.getElementById('leg-tab-contenido'));
 }
 
 // ── ESTILOS ───────────────────────────────────────────

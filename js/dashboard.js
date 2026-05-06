@@ -516,70 +516,201 @@ async function rDashEOE() {
   const instId = USUARIO_ACTUAL.institucion_id;
   const miId   = USUARIO_ACTUAL.id;
   const sem    = _semanaActual();
+  const hoy    = sem.hoy;
 
-  const [casosRes, objRes, eventosRes, respRes, alertasRes] = await Promise.all([
+  const [casosRes, alertasAsistRes, derivRes, eventosProxRes] = await Promise.all([
     sb.from('problematicas')
-      .select('id,tipo,urgencia,alumno:alumnos(nombre,apellido)')
+      .select('id,tipo,urgencia,estado,created_at,alumno_id,alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division,nivel))')
       .eq('institucion_id', instId)
       .in('estado', ['abierta','en_seguimiento'])
-      .in('tipo', ['emocional','familiar','salud']),
-    sb.from('objetivos')
-      .select('id,nombre,estado,tendencia')
+      .is('problematica_madre_id', null),
+    sb.from('alertas_asistencia')
+      .select('alumno_id,tipo_alerta,total_faltas,alumnos(nombre,apellido,cursos(nombre,division,nivel))')
       .eq('institucion_id', instId)
-      .not('estado', 'in', '("archivado","logrado")'),
+      .order('tipo_alerta', { ascending: false }),
+    sb.from('derivaciones')
+      .select('id,tipo_servicio,institucion_destino,fecha_derivacion,estado,created_at,alumno:alumnos(nombre,apellido)')
+      .eq('institucion_id', instId)
+      .in('estado', ['pendiente','en_seguimiento'])
+      .order('fecha_derivacion'),
     sb.from('eventos_institucionales')
-      .select('id,nombre,hora,lugar,nivel,fecha_inicio,convocados_ids,creado_por')
+      .select('id,nombre,hora,fecha_inicio,lugar,nivel,convocados_ids,convocatoria_grupos')
       .eq('institucion_id', instId)
-      .gte('fecha_inicio', sem.inicio)
-      .lte('fecha_inicio', sem.fin)
-      .order('fecha_inicio').order('hora', { nullsFirst: true }),
-    sb.from('evento_respuestas')
-      .select('id,eventos_institucionales(nombre,hora,lugar)')
-      .eq('usuario_id', miId).eq('respuesta', 'pendiente'),
-    sb.from('alertas_problematicas')
-      .select('id,problematica:problematicas(id,tipo,urgencia,alumno:alumnos(nombre,apellido))')
-      .eq('usuario_id', miId).eq('leida', false)
-      .order('created_at', { ascending:false }).limit(10),
+      .gte('fecha_inicio', hoy)
+      .order('fecha_inicio').order('hora', { nullsFirst: true })
+      .limit(10),
   ]);
 
-  const casos      = casosRes.data   || [];
-  const objetivos  = objRes.data     || [];
-  const eventosSem = eventosRes.data || [];
-  const pendientes = (respRes.data   || []).filter(r => r.eventos_institucionales);
-  const alertas    = alertasRes.error ? [] : (alertasRes.data || []);
-  const urgentes   = casos.filter(p => p.urgencia === 'alta');
+  const casos       = casosRes.data        || [];
+  const alertasAsist= alertasAsistRes.data || [];
+  const derivaciones= derivRes.data        || [];
+
+  // Última intervención por caso
+  const casosIds = casos.map(p => p.id);
+  let lastIntervMap = {};
+  if (casosIds.length) {
+    const { data: lastInts } = await sb.from('intervenciones')
+      .select('problematica_id,created_at')
+      .in('problematica_id', casosIds)
+      .order('created_at', { ascending: false });
+    (lastInts || []).forEach(iv => {
+      if (!lastIntervMap[iv.problematica_id]) lastIntervMap[iv.problematica_id] = iv.created_at;
+    });
+  }
+
+  // Alumnos con problematica activa (para excluirlos de "en riesgo sin seguimiento")
+  const alumnosConProb = new Set(casos.map(p => p.alumno_id).filter(Boolean));
+
+  // Alumnos en riesgo sin problematica activa
+  const enRiesgoSinProb = alertasAsist.filter(a => !alumnosConProb.has(a.alumno_id));
+
+  // Próximas actividades del EOE
+  const eventosEOE = (eventosProxRes.data || []).filter(e =>
+    (e.convocados_ids || []).includes(miId) ||
+    (e.convocatoria_grupos || []).includes('eoe')
+  ).slice(0, 5);
 
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
 
+  // ── Sección 1: Casos activos ──
+  const casosOrdenados = [...casos].sort((a, b) => {
+    const dA = lastIntervMap[a.id] ? new Date(lastIntervMap[a.id]) : new Date(a.created_at);
+    const dB = lastIntervMap[b.id] ? new Date(lastIntervMap[b.id]) : new Date(b.created_at);
+    return dA - dB; // más silenciosos primero
+  });
+
+  const casosHTML = casosOrdenados.length ? casosOrdenados.map(p => {
+    const al    = p.alumno;
+    const cu    = al?.curso;
+    const nom   = al ? `${al.apellido}, ${al.nombre}` : '—';
+    const cur   = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '—';
+    const base  = lastIntervMap[p.id] ? new Date(lastIntervMap[p.id]) : new Date(p.created_at);
+    const dias  = Math.floor((Date.now() - base.getTime()) / 86400000);
+    const alerta= dias > 14;
+    const urgCls= p.urgencia === 'alta' ? 'tr' : p.urgencia === 'media' ? 'ta' : 'tg';
+    return `
+      <div class="card" style="padding:10px 14px;margin-bottom:6px;border-left:3px solid ${alerta ? 'var(--rojo)' : 'var(--brd)'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600">${nom}</div>
+            <div style="font-size:10px;color:var(--txt2)">${cur}</div>
+          </div>
+          <span class="tag ${urgCls}" style="font-size:9px;flex-shrink:0">Urg. ${p.urgencia}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+          <span style="font-size:10px;color:${alerta ? 'var(--rojo)' : dias > 7 ? 'var(--ambar)' : 'var(--txt3)'}">
+            ${dias === 0 ? 'Hoy' : `${dias}d sin intervención`}
+          </span>
+          <button class="btn-ghost" style="font-size:10px;padding:2px 6px" onclick="goPage('prob')">Ver →</button>
+        </div>
+      </div>`;
+  }).join('') : '<div style="font-size:11px;color:var(--txt2);padding:10px 0">Sin casos activos.</div>';
+
+  // ── Sección 2: En riesgo sin problematica ──
+  const riesgoHTML = enRiesgoSinProb.length ? enRiesgoSinProb.slice(0, 6).map(a => {
+    const al  = a.alumnos;
+    const cu  = al?.cursos;
+    const nom = al ? `${al.apellido}, ${al.nombre}` : '—';
+    const cur = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '—';
+    const clr = a.tipo_alerta >= 3 ? 'var(--rojo)' : 'var(--ambar)';
+    return `
+      <div class="card" style="padding:10px 14px;margin-bottom:6px;display:flex;align-items:center;gap:10px;border-left:3px solid ${clr}">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${nom}</div>
+          <div style="font-size:10px;color:var(--txt2)">${cur} · ${a.total_faltas} faltas</div>
+        </div>
+        <button class="btn-s" style="font-size:10px;padding:4px 8px;flex-shrink:0" onclick="goPage('prob')">+ Caso</button>
+      </div>`;
+  }).join('') + (enRiesgoSinProb.length > 6 ? `<div style="font-size:10px;color:var(--verde);margin-top:4px">+ ${enRiesgoSinProb.length - 6} más</div>` : '')
+  : '<div style="font-size:11px;color:var(--verde);padding:10px 0">✅ Sin alumnos en riesgo sin seguimiento.</div>';
+
+  // ── Sección 3: Derivaciones en curso ──
+  const TIPO_SERV_LABEL = {
+    salud_mental:'Salud mental', hospital:'Hospital', trabajo_social:'Trabajo social',
+    justicia:'Justicia', educacion_especial:'Ed. especial', otro:'Otro',
+  };
+  const derivHTML = derivaciones.length ? derivaciones.map(d => {
+    const al    = d.alumno;
+    const nom   = al ? `${al.apellido}, ${al.nombre}` : '—';
+    const dias  = Math.floor((Date.now() - new Date(d.fecha_derivacion + 'T12:00:00').getTime()) / 86400000);
+    const estadoClr = d.estado === 'pendiente' ? 'var(--ambar)' : 'var(--azul)';
+    return `
+      <div class="card" style="padding:10px 14px;margin-bottom:6px;border-left:3px solid ${estadoClr}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600">${nom}</div>
+            <div style="font-size:10px;color:var(--txt2)">${TIPO_SERV_LABEL[d.tipo_servicio] || d.tipo_servicio} → ${d.institucion_destino}</div>
+          </div>
+          <span class="tag ${d.estado === 'pendiente' ? 'ta' : 'tp'}" style="font-size:9px;flex-shrink:0">
+            ${d.estado === 'pendiente' ? 'Pendiente' : 'En seguimiento'}
+          </span>
+        </div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:4px">${dias}d sin respuesta · ${formatFechaLatam(d.fecha_derivacion)}</div>
+      </div>`;
+  }).join('')
+  : '<div style="font-size:11px;color:var(--verde);padding:10px 0">✅ Sin derivaciones en curso.</div>';
+
+  // ── Sección 4: Próximas actividades ──
+  const actHTML = eventosEOE.length ? eventosEOE.map(e => {
+    const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--brd);cursor:pointer" onclick="goPage('agenda')">
+        <div style="width:3px;height:32px;background:${nc.color};border-radius:2px;flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.nombre}</div>
+          <div style="font-size:10px;color:var(--txt2)">${formatFechaLatam(e.fecha_inicio)}${e.hora ? ' · ' + e.hora.slice(0,5) : ''}${e.lugar ? ' · ' + e.lugar : ''}</div>
+        </div>
+      </div>`;
+  }).join('')
+  : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin actividades próximas.</div>';
+
   document.getElementById('page-dash').innerHTML = `
     <div class="pg-t">${saludo}, ${apellido} 👋</div>
-    <div class="pg-s" style="margin-bottom:14px">${_fechaStr()} · Orientación escolar</div>
+    <div class="pg-s" style="margin-bottom:14px">${_fechaStr()} · Orientación Escolar</div>
 
-    ${renderAlertasProb(alertas)}
-    ${urgentes.length ? `
-      <div class="alr" style="margin-bottom:14px">
-        <div class="alr-t">⚠️ ${urgentes.length} caso${urgentes.length > 1 ? 's' : ''} urgente${urgentes.length > 1 ? 's' : ''}</div>
-        <div class="acc"><button class="btn-d" onclick="goPage('eoe')">Ver casos →</button></div>
-      </div>` : ''}
-    ${renderObjetivosStrip(objetivos)}
-
-    ${renderPendientesRespuesta(pendientes)}
+    <div class="metrics m3" style="margin-bottom:14px">
+      <div class="mc" style="cursor:pointer" onclick="goPage('prob')">
+        <div class="mc-v" style="color:var(--rojo)">${casos.filter(p => p.urgencia === 'alta').length}</div>
+        <div class="mc-l">URGENTES</div>
+      </div>
+      <div class="mc" style="cursor:pointer" onclick="goPage('prob')">
+        <div class="mc-v" style="color:var(--ambar)">${casos.length}</div>
+        <div class="mc-l">CASOS ACTIVOS</div>
+      </div>
+      <div class="mc">
+        <div class="mc-v" style="color:var(--azul)">${derivaciones.length}</div>
+        <div class="mc-l">DERIVACIONES</div>
+      </div>
+    </div>
 
     <div class="dash-cols">
       <div class="dash-col-l">
-        <div class="sec-lb">Mis casos EOE</div>
-        <div class="metrics m2" style="margin-bottom:12px">
-          <div class="mc"><div class="mc-v" style="color:var(--rojo)">${urgentes.length}</div><div class="mc-l">Urgentes</div></div>
-          <div class="mc"><div class="mc-v" style="color:var(--ambar)">${casos.length - urgentes.length}</div><div class="mc-l">Seguimiento</div></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="sec-lb" style="margin:0">Casos activos</div>
+          <button class="btn-ghost" onclick="goPage('prob')" style="font-size:11px">Ver todos →</button>
         </div>
-        <div class="acc">
-          <button class="btn-p" onclick="goPage('eoe')">✦ Ver mis casos</button>
-          <button class="btn-s" onclick="goPage('leg')">▤ Resumen</button>
-          <button class="btn-s" onclick="goPage('prob')">△ Situaciones</button>
+        ${casosHTML}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+          <div class="sec-lb" style="margin:0">⚠️ En riesgo sin seguimiento</div>
         </div>
+        ${riesgoHTML}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+          <div class="sec-lb" style="margin:0">Derivaciones en curso</div>
+        </div>
+        ${derivHTML}
+
       </div>
       <div class="dash-col-r">
-        ${renderAgendaSemana(eventosSem, sem, null)}
+        <div class="card" style="padding:14px">
+          <div class="sec-lb" style="margin:0 0 10px">Próximas actividades</div>
+          ${actHTML}
+          <div style="margin-top:8px">
+            <button class="btn-ghost" onclick="goPage('agenda')" style="font-size:11px">Ver agenda →</button>
+          </div>
+        </div>
       </div>
     </div>`;
 

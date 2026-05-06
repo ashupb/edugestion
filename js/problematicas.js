@@ -31,10 +31,21 @@ function probPermisos() {
     soloCursos:  false,
     crear:       true,
     agregarSeg:  ['director_general','directivo_nivel','eoe','preceptor'].includes(rol),
-    cerrar:      ['director_general','directivo_nivel','eoe'].includes(rol),
-    reabrir:     ['director_general','directivo_nivel','eoe'].includes(rol),
+    cerrar:      ['director_general','directivo_nivel'].includes(rol),
+    reabrir:     ['director_general','directivo_nivel'].includes(rol),
   };
 }
+
+const _EOE_TIPOS_INTERV = [
+  { val:'entrevista_alumno',  lbl:'Entrevista con alumno' },
+  { val:'entrevista_familia', lbl:'Entrevista con familia' },
+  { val:'reunion_eoe',        lbl:'Reunión de equipo EOE' },
+  { val:'articulacion_doc',   lbl:'Articulación con docentes' },
+  { val:'articulacion_ext',   lbl:'Articulación externa' },
+  { val:'seguimiento',        lbl:'Seguimiento' },
+  { val:'derivacion',         lbl:'Derivación' },
+  { val:'observacion',        lbl:'Observación / nota' },
+];
 
 function puedeAgregarSeg(prob) {
   const perm = probPermisos();
@@ -396,7 +407,27 @@ async function cargarDetProb(probId) {
 
       ${puedeSeg && !cerrada ? `
       <div style="margin-top:12px;border-top:1px solid var(--brd);padding-top:12px">
-        <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar seguimiento${esGrupal ? ' grupal' : ''}</div>
+        <div style="font-size:11px;font-weight:600;margin-bottom:8px">Agregar ${USUARIO_ACTUAL.rol === 'eoe' ? 'intervención' : 'seguimiento'}${esGrupal ? ' grupal' : ''}</div>
+        ${USUARIO_ACTUAL.rol === 'eoe' ? `
+        <select id="eoe-tipo-${probId}" style="margin-bottom:8px;font-size:12px"
+          onchange="_toggleDerivForm('${probId}',this.value)">
+          ${_EOE_TIPOS_INTERV.map(t => `<option value="${t.val}">${t.lbl}</option>`).join('')}
+        </select>
+        <div id="eoe-deriv-form-${probId}" style="display:none;margin-bottom:10px;padding:10px;background:var(--surf2);border-radius:var(--rad);border:1px solid var(--brd)">
+          <div style="font-size:10px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Datos de la derivación</div>
+          <select id="eoe-deriv-tipo-${probId}" style="margin-bottom:6px;font-size:11px">
+            <option value="salud_mental">Salud mental</option>
+            <option value="hospital">Hospital</option>
+            <option value="trabajo_social">Trabajo social</option>
+            <option value="justicia">Justicia</option>
+            <option value="educacion_especial">Educación especial</option>
+            <option value="otro">Otro</option>
+          </select>
+          <input type="text" id="eoe-deriv-inst-${probId}" placeholder="Institución/servicio destino *" style="margin-bottom:6px;font-size:11px">
+          <input type="text" id="eoe-deriv-prof-${probId}" placeholder="Profesional (opcional)" style="margin-bottom:6px;font-size:11px">
+          <input type="date" id="eoe-deriv-fecha-${probId}" value="${hoyISO()}" style="margin-bottom:6px;font-size:11px">
+          <textarea id="eoe-deriv-motivo-${probId}" rows="2" placeholder="Motivo de la derivación *" style="font-size:11px"></textarea>
+        </div>` : ''}
         <textarea id="id-${probId}" rows="2" placeholder="Describí la acción tomada..."></textarea>
         <input type="text" id="ip-${probId}" placeholder="Próximo paso (opcional)" style="margin-top:6px">
         <div style="margin-top:8px">
@@ -414,7 +445,7 @@ async function cargarDetProb(probId) {
           </div>
         </div>
         <div class="acc" style="margin-top:8px">
-          <button class="btn-p" style="font-size:11px" onclick="guardarSeguimiento('${probId}')">Guardar</button>
+          <button class="btn-p" style="font-size:11px" onclick="${USUARIO_ACTUAL.rol === 'eoe' ? `guardarIntervencionEOE('${probId}')` : `guardarSeguimiento('${probId}')`}">Guardar</button>
         </div>
       </div>` : ''}
 
@@ -579,6 +610,60 @@ async function guardarSeguimiento(probId) {
     resultado:       result,
   });
   if (error) { alert('Error: ' + error.message); return; }
+  await sb.from('problematicas')
+    .update({ estado: 'en_seguimiento', updated_at: new Date().toISOString() })
+    .eq('id', probId);
+  await rProb();
+}
+
+function _toggleDerivForm(probId, tipo) {
+  const el = document.getElementById(`eoe-deriv-form-${probId}`);
+  if (el) el.style.display = tipo === 'derivacion' ? 'block' : 'none';
+}
+
+async function guardarIntervencionEOE(probId) {
+  const tipoEl  = document.getElementById(`eoe-tipo-${probId}`);
+  const tipo    = tipoEl?.value || 'seguimiento';
+  const d       = document.getElementById('id-' + probId)?.value.trim();
+  const p       = document.getElementById('ip-' + probId)?.value.trim();
+  const result  = document.querySelector(`input[name="res-${probId}"]:checked`)?.value || null;
+
+  if (!d) { alert('Describí la acción tomada.'); return; }
+
+  const tipoLabel = _EOE_TIPOS_INTERV.find(t => t.val === tipo)?.lbl || tipo;
+  const desc      = `[${tipoLabel}] ${d}`;
+
+  const { error } = await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Seguimiento',
+    descripcion:     desc,
+    proximo_paso:    p || null,
+    tipo,
+    resultado:       result,
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+
+  if (tipo === 'derivacion') {
+    const prob      = (window._probCache || []).find(pr => pr.id === probId);
+    const alumnoId  = prob?.alumno_id;
+    const instDest  = document.getElementById(`eoe-deriv-inst-${probId}`)?.value.trim();
+    const motivoTxt = document.getElementById(`eoe-deriv-motivo-${probId}`)?.value.trim();
+    if (alumnoId && instDest && motivoTxt) {
+      await sb.from('derivaciones').insert({
+        institucion_id:      USUARIO_ACTUAL.institucion_id,
+        alumno_id:           alumnoId,
+        problematica_id:     probId,
+        tipo_servicio:       document.getElementById(`eoe-deriv-tipo-${probId}`)?.value || 'otro',
+        institucion_destino: instDest,
+        profesional_destino: document.getElementById(`eoe-deriv-prof-${probId}`)?.value.trim() || null,
+        fecha_derivacion:    document.getElementById(`eoe-deriv-fecha-${probId}`)?.value || hoyISO(),
+        motivo:              motivoTxt,
+        creado_por:          USUARIO_ACTUAL.id,
+      });
+    }
+  }
+
   await sb.from('problematicas')
     .update({ estado: 'en_seguimiento', updated_at: new Date().toISOString() })
     .eq('id', probId);

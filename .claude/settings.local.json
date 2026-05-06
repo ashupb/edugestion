@@ -3,7 +3,8 @@
     "allow": [
       "Bash(supabase functions *)",
       "Bash(where npx *)",
-      "Bash(npx supabase *)"
+      "Bash(npx supabase *)",
+      "PowerShell(New-Item -ItemType Directory -Path \"c:\\\\Users\\\\apere\\\\OneDrive\\\\Desktop\\\\kairu_demo\\\\migrations\" -Force)"
     ]
   }
 }
