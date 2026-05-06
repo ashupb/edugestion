@@ -33,6 +33,7 @@ function probPermisos() {
     agregarSeg:  ['director_general','directivo_nivel','eoe','preceptor'].includes(rol),
     cerrar:      ['director_general','directivo_nivel'].includes(rol),
     reabrir:     ['director_general','directivo_nivel'].includes(rol),
+    derivarEOE:  ['director_general','directivo_nivel','preceptor','docente'].includes(rol),
   };
 }
 
@@ -449,11 +450,13 @@ async function cargarDetProb(probId) {
         </div>
       </div>` : ''}
 
-      <div class="acc" style="margin-top:10px;border-top:1px solid var(--brd);padding-top:10px">
+      <div class="acc" style="margin-top:10px;border-top:1px solid var(--brd);padding-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         ${perm.cerrar && !cerrada ? `<button class="btn-d" style="font-size:11px" onclick="mostrarFormCierre('${probId}')">Cerrar caso</button>` : ''}
         ${perm.reabrir && cerrada ? `<button class="btn-s" style="font-size:11px" onclick="reabrirProb('${probId}')">Reabrir caso</button>` : ''}
+        ${perm.derivarEOE && !cerrada ? `<button class="btn-s" style="font-size:11px;color:var(--azul);border-color:var(--azul)" onclick="derivarAEOE('${probId}')">Derivar a EOE</button>` : ''}
       </div>
       <div id="cierre-form-${probId}"></div>
+      <div id="deriv-eoe-form-${probId}"></div>
     </div>`;
 }
 
@@ -1411,6 +1414,65 @@ async function togDetProbLegajo(probId) {
       <div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Bitácora de seguimiento</div>
       ${invsHTML}
     </div>`;
+}
+
+// ─── DERIVAR A EOE ────────────────────────────────────
+
+function derivarAEOE(probId) {
+  const cont = document.getElementById(`deriv-eoe-form-${probId}`);
+  if (!cont) return;
+  if (cont.innerHTML) { cont.innerHTML = ''; return; }
+  cont.innerHTML = `
+    <div style="margin-top:10px;padding:12px;background:var(--azul-l);border:1px solid rgba(59,130,246,.2);border-radius:var(--rad)">
+      <div style="font-size:10px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Derivar al Equipo de Orientación Escolar</div>
+      <textarea id="deriv-eoe-motivo-${probId}" rows="3" placeholder="Motivo de la derivación a EOE *" style="margin-bottom:8px;font-size:11px"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-s" style="font-size:11px" onclick="document.getElementById('deriv-eoe-form-${probId}').innerHTML=''">Cancelar</button>
+        <button class="btn-p" style="font-size:11px" id="btn-deriv-eoe-${probId}" onclick="_guardarDerivAEOE('${probId}')">Confirmar derivación</button>
+      </div>
+    </div>`;
+}
+
+async function _guardarDerivAEOE(probId) {
+  const motivo = document.getElementById(`deriv-eoe-motivo-${probId}`)?.value.trim();
+  if (!motivo) { alert('Ingresá el motivo de la derivación.'); return; }
+
+  const btn = document.getElementById(`btn-deriv-eoe-${probId}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Derivando...'; }
+
+  // Registrar intervención
+  await sb.from('intervenciones').insert({
+    problematica_id: probId,
+    registrado_por:  USUARIO_ACTUAL.id,
+    titulo:          'Derivación a EOE',
+    descripcion:     motivo,
+    tipo:            'derivacion_eoe',
+  });
+
+  // Notificar a todos los usuarios EOE de la institución
+  const { data: equipo } = await sb.from('usuarios').select('id')
+    .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+    .eq('rol', 'eoe')
+    .or('activo.is.null,activo.eq.true');
+
+  const dests = (equipo || []).map(u => u.id).filter(id => id !== USUARIO_ACTUAL.id);
+  if (dests.length) {
+    await sb.from('notificaciones').insert(
+      dests.map(uid => ({
+        usuario_id:       uid,
+        tipo:             'derivacion_eoe',
+        titulo:           'Derivación a EOE',
+        descripcion:      `${USUARIO_ACTUAL.nombre_completo} derivó un caso al equipo EOE. Motivo: ${motivo}`,
+        referencia_id:    probId,
+        referencia_tabla: 'problematicas',
+      }))
+    );
+  }
+
+  document.getElementById(`deriv-eoe-form-${probId}`).innerHTML = '';
+  if (typeof _toastObj === 'function') _toastObj('✓ Caso derivado al EOE. Notificación enviada.');
+  cargarNotificaciones?.();
+  await rProb();
 }
 
 // ─── BACKWARD COMPAT ──────────────────────────────────

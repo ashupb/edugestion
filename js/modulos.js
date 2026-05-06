@@ -1055,7 +1055,7 @@ async function rEOE() {
         .in('tipo', ['emocional', 'familiar', 'salud'])
         .order('urgencia', { ascending: false }),
       sb.from('reuniones')
-        .select(`*, prob:problematicas(descripcion)`)
+        .select(`*, prob:problematicas(descripcion), obj:objetivos(titulo)`)
         .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
         .not('tipo_actividad', 'is', null)
         .order('fecha', { ascending: false })
@@ -1127,12 +1127,15 @@ const _ACT_TIPO_LABEL = {
 let _actAlumnosSel = [];
 let _actBusqTimer  = null;
 let _actAlumnosMap = {};
+let _actEncuentros = []; // encuentros adicionales (índice 0 = 2do encuentro visual)
 
 function _renderActCard(a, hoy) {
   const esPasada  = a.fecha < hoy;
   const tipoLabel = _ACT_TIPO_LABEL[a.tipo_actividad] || a.tipo_actividad;
   const hora      = a.hora ? a.hora.slice(0, 5) : '';
   const probDesc  = a.prob?.descripcion;
+  const objTit    = a.obj?.titulo;
+  const planTxt   = a.objetivo_actividad || a.descripcion;
   return `
     <div class="card" style="margin-bottom:8px${esPasada ? ';opacity:.75' : ''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
@@ -1141,27 +1144,38 @@ function _renderActCard(a, hoy) {
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">
         <span class="tag tp">${tipoLabel}</span>
-        ${probDesc ? `<span class="tag td" style="font-size:9px">Prob: ${probDesc.slice(0, 30)}${probDesc.length > 30 ? '…' : ''}</span>` : ''}
+        ${probDesc ? `<span class="tag td" style="font-size:9px">Prob: ${probDesc.slice(0,30)}${probDesc.length>30?'…':''}</span>` : ''}
+        ${objTit  ? `<span class="tag ta" style="font-size:9px">Obj: ${objTit.slice(0,30)}${objTit.length>30?'…':''}</span>` : ''}
+        ${a.en_agenda ? `<span class="tag tg" style="font-size:9px">En agenda</span>` : ''}
       </div>
       <div style="font-size:10px;color:var(--txt2)">
         ${formatFechaCorta(a.fecha)}${hora ? ' · ' + hora : ''}${a.lugar ? ' · ' + a.lugar : ''}
       </div>
       ${a.destinatarios_texto ? `<div style="font-size:10px;color:var(--txt3);margin-top:2px">Destinatarios: ${a.destinatarios_texto}</div>` : ''}
-      ${a.descripcion ? `<div style="font-size:11px;color:var(--txt2);margin-top:4px">${a.descripcion}</div>` : ''}
+      ${planTxt ? `<div style="font-size:11px;color:var(--txt2);margin-top:4px;font-style:italic">${planTxt}</div>` : ''}
+      ${a.resultado ? `
+        <div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--verde-l);border-radius:var(--rad)">
+          <span style="font-size:9px;font-weight:700;color:var(--verde);text-transform:uppercase;display:block;margin-bottom:2px">Resultado</span>
+          ${a.resultado}
+        </div>` : ''}
     </div>`;
 }
 
 async function _abrirFormActividad() {
   _actAlumnosSel = [];
   _actAlumnosMap = {};
+  _actEncuentros = [];
 
-  const [cursosRes, probsRes, usrsRes] = await Promise.all([
+  const [cursosRes, probsRes, objsRes, usrsRes] = await Promise.all([
     sb.from('cursos').select('id,nombre,division,anio,nivel')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .or('activo.is.null,activo.eq.true').order('nivel').order('anio'),
     sb.from('problematicas').select('id,descripcion,alumno:alumnos(apellido,nombre)')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .neq('estado', 'resuelta').order('created_at', { ascending: false }).limit(50),
+    sb.from('objetivos').select('id,titulo')
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .not('estado', 'eq', 'archivado').order('created_at', { ascending: false }).limit(50),
     sb.from('usuarios').select('id,nombre_completo,rol')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .or('activo.is.null,activo.eq.true')
@@ -1170,6 +1184,7 @@ async function _abrirFormActividad() {
 
   const cursos = cursosRes.data || [];
   const probs  = probsRes.data  || [];
+  const objs   = objsRes.data   || [];
   const usrs   = usrsRes.data   || [];
   window._actTodosCursos = cursos;
 
@@ -1177,15 +1192,17 @@ async function _abrirFormActividad() {
   const mostrarNivel = nivelesDisp.length > 1;
   const nivelesOpts  = nivelesDisp.map(n =>
     `<option value="${n}">${n[0].toUpperCase() + n.slice(1)}</option>`).join('');
-  const cursoOpts = cursos.map(cu => {
-    const lbl = [cu.anio ? cu.anio + '°' : '', cu.nombre, cu.division || ''].filter(Boolean).join(' ');
-    return `<option value="${cu.id}" data-nivel="${cu.nivel}">${lbl} · ${cu.nivel}</option>`;
-  }).join('');
+
   const probsOpts = probs.map(p => {
     const nom  = p.alumno ? ` — ${p.alumno.apellido}, ${p.alumno.nombre}` : '';
     const desc = (p.descripcion || 'Sin descripción').slice(0, 40);
     return `<option value="${p.id}">${desc}${nom}</option>`;
   }).join('');
+
+  const objsOpts = objs.map(o =>
+    `<option value="${o.id}">${(o.titulo || 'Sin título').slice(0, 50)}</option>`
+  ).join('');
+
   const invOpts = usrs.map(u => `
     <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;padding:3px 0">
       <input type="checkbox" class="act-inv-chk" value="${u.id}">
@@ -1193,8 +1210,11 @@ async function _abrirFormActividad() {
       <span style="font-size:9px;color:var(--txt3)">${u.rol}</span>
     </label>`).join('');
 
+  const cursosChksHTML = _buildCursosChks(cursos, '');
+
   const html = `
-    <div style="display:grid;gap:12px">
+    <div style="display:grid;gap:14px">
+
       <div><label class="lbl">Título *</label>
         <input type="text" id="act-titulo" placeholder="Ej: Taller sobre vínculos saludables"></div>
 
@@ -1207,30 +1227,56 @@ async function _abrirFormActividad() {
           <option value="otra">Otra</option>
         </select></div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><label class="lbl">Fecha *</label>${renderFechaInput('act-fecha', hoyISO())}</div>
-        <div><label class="lbl">Hora</label>
-          <input type="time" id="act-hora" style="width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:8px;background:var(--surf);color:var(--txt)">
+      <div><label class="lbl">Lugar</label>
+        <input type="text" id="act-lugar" placeholder="Aula, SUM, salón de actos..."></div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label class="lbl" style="margin:0">Encuentros *</label>
+          <button type="button" class="btn-s" style="font-size:10px;padding:3px 8px" onclick="_addEncuentro()">+ Agregar encuentro</button>
+        </div>
+        <div id="act-encuentros-list">
+          <div data-enc-main style="background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad);padding:10px;margin-bottom:6px">
+            <div style="font-size:10px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Encuentro 1</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div><label class="lbl">Fecha *</label>${renderFechaInput('act-fecha', hoyISO())}</div>
+              <div><label class="lbl">Hora</label>
+                <input type="time" id="act-hora" style="width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:8px;background:var(--surf);color:var(--txt)">
+              </div>
+            </div>
+            <div><label class="lbl">Temática</label>
+              <input type="text" id="enc-tematica-0" placeholder="Tema de este encuentro (opcional)">
+            </div>
+          </div>
+          <div id="enc-extras"></div>
         </div>
       </div>
 
       <div>
         <label class="lbl">Destinatarios</label>
-        <div style="display:flex;gap:14px;margin-bottom:8px">
+        <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
-            <input type="radio" name="act-dest-tipo" value="curso" checked onchange="_actDestTipoChange('curso')"> Curso completo
+            <input type="radio" name="act-dest-tipo" value="nivel_completo" checked onchange="_actDestTipoChange('nivel_completo')"> Nivel completo
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-dest-tipo" value="cursos_multiples" onchange="_actDestTipoChange('cursos_multiples')"> Varios cursos
           </label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
             <input type="radio" name="act-dest-tipo" value="alumnos_individuales" onchange="_actDestTipoChange('alumnos_individuales')"> Alumnos individuales
           </label>
         </div>
-        <div id="act-dest-curso">
-          ${mostrarNivel ? `<div style="margin-bottom:6px"><select id="act-nivel" onchange="_actNivelChange(this.value)" style="width:100%">
-            <option value="">Todos los niveles</option>${nivelesOpts}
-          </select></div>` : ''}
-          <select id="act-curso" style="width:100%">
-            <option value="">— Seleccioná un curso (opcional) —</option>${cursoOpts}
+        <div id="act-dest-nivel">
+          <select id="act-nivel-completo" style="width:100%">
+            <option value="">— Seleccioná nivel —</option>${nivelesOpts}
           </select>
+        </div>
+        <div id="act-dest-cursos" style="display:none">
+          ${mostrarNivel ? `<select id="act-nivel-filter" style="margin-bottom:8px;width:100%" onchange="_actFiltrarCursos(this.value)">
+            <option value="">Todos los niveles</option>${nivelesOpts}
+          </select>` : ''}
+          <div id="act-cursos-chks" style="border:1px solid var(--brd);border-radius:var(--rad);max-height:150px;overflow-y:auto;padding:6px 10px">
+            ${cursosChksHTML}
+          </div>
         </div>
         <div id="act-dest-alumnos" style="display:none">
           <input type="text" id="act-busq-alum" placeholder="Buscar alumno por apellido..."
@@ -1240,20 +1286,53 @@ async function _abrirFormActividad() {
         </div>
       </div>
 
-      <div><label class="lbl">Problemática relacionada (opcional)</label>
-        <select id="act-prob" style="width:100%">
-          <option value="">— Sin problemática vinculada —</option>${probsOpts}
-        </select></div>
+      <div>
+        <label class="lbl">Relacionar con (opcional)</label>
+        <div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-rel-tipo" value="" checked onchange="_actRelTipoChange('')"> Ninguno
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-rel-tipo" value="prob" onchange="_actRelTipoChange('prob')"> Problemática
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px">
+            <input type="radio" name="act-rel-tipo" value="obj" onchange="_actRelTipoChange('obj')"> Objetivo institucional
+          </label>
+        </div>
+        <div id="act-rel-prob" style="display:none">
+          <select id="act-prob" style="width:100%">
+            <option value="">— Seleccioná problemática —</option>${probsOpts}
+          </select>
+        </div>
+        <div id="act-rel-obj" style="display:none">
+          <select id="act-objetivo" style="width:100%">
+            <option value="">— Seleccioná objetivo —</option>${objsOpts}
+          </select>
+        </div>
+      </div>
+
+      <div class="toggle-row-ui">
+        <div>
+          <div style="font-size:12px;font-weight:500">Agregar a la agenda institucional</div>
+          <div style="font-size:10px;color:var(--txt2)">Aparecerá visible para todos en Agenda</div>
+        </div>
+        <div class="tog off" id="act-en-agenda" onclick="this.classList.toggle('on');this.classList.toggle('off')">
+          <div class="tog-thumb"></div>
+        </div>
+      </div>
 
       <div>
         <label class="lbl">Invitados de la institución</label>
-        <div style="border:1px solid var(--brd);border-radius:var(--rad);max-height:120px;overflow-y:auto;padding:6px 10px">
+        <div style="border:1px solid var(--brd);border-radius:var(--rad);max-height:130px;overflow-y:auto;padding:6px 10px">
           ${invOpts || '<div style="font-size:11px;color:var(--txt2)">Sin usuarios disponibles</div>'}
         </div>
       </div>
 
-      <div><label class="lbl">Descripción / Objetivos</label>
-        <textarea id="act-desc" rows="3" placeholder="Objetivos de la actividad, metodología prevista..."></textarea></div>
+      <div><label class="lbl">Objetivo de la actividad</label>
+        <textarea id="act-objetivo-txt" rows="2" placeholder="¿Qué se busca lograr con esta actividad?"></textarea></div>
+
+      <div><label class="lbl">Resultado / descripción</label>
+        <textarea id="act-desc" rows="2" placeholder="Podés completar esto luego de realizada la actividad..."></textarea></div>
     </div>`;
 
   const btns = `
@@ -1262,21 +1341,70 @@ async function _abrirFormActividad() {
   _objModal('modal-act-eoe', 'Nueva actividad EOE', html, btns);
 }
 
-function _actDestTipoChange(tipo) {
-  document.getElementById('act-dest-curso').style.display   = tipo === 'curso' ? '' : 'none';
-  document.getElementById('act-dest-alumnos').style.display = tipo === 'alumnos_individuales' ? '' : 'none';
+function _buildCursosChks(cursos, nivelFiltro) {
+  const lista = nivelFiltro ? cursos.filter(c => c.nivel === nivelFiltro) : cursos;
+  if (!lista.length) return '<div style="font-size:11px;color:var(--txt2)">Sin cursos disponibles</div>';
+  return lista.map(cu => {
+    const lbl = [cu.anio ? cu.anio + '°' : '', cu.nombre, cu.division || ''].filter(Boolean).join(' ');
+    return `<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;padding:3px 0">
+      <input type="checkbox" class="act-curso-chk" value="${cu.id}" data-label="${lbl} · ${cu.nivel}" data-nivel="${cu.nivel}">
+      <span style="flex:1">${lbl}</span>
+      <span style="font-size:9px;color:var(--txt3)">${cu.nivel}</span>
+    </label>`;
+  }).join('');
 }
 
-function _actNivelChange(nivel) {
-  const sel       = document.getElementById('act-curso');
-  if (!sel) return;
-  const todos     = window._actTodosCursos || [];
-  const filtrados = nivel ? todos.filter(c => c.nivel === nivel) : todos;
-  sel.innerHTML   = '<option value="">— Seleccioná un curso (opcional) —</option>' +
-    filtrados.map(cu => {
-      const lbl = [cu.anio ? cu.anio + '°' : '', cu.nombre, cu.division || ''].filter(Boolean).join(' ');
-      return `<option value="${cu.id}" data-nivel="${cu.nivel}">${lbl} · ${cu.nivel}</option>`;
-    }).join('');
+function _actDestTipoChange(tipo) {
+  document.getElementById('act-dest-nivel').style.display    = tipo === 'nivel_completo'      ? '' : 'none';
+  document.getElementById('act-dest-cursos').style.display   = tipo === 'cursos_multiples'    ? '' : 'none';
+  document.getElementById('act-dest-alumnos').style.display  = tipo === 'alumnos_individuales'? '' : 'none';
+}
+
+function _actFiltrarCursos(nivel) {
+  const el = document.getElementById('act-cursos-chks');
+  if (el) el.innerHTML = _buildCursosChks(window._actTodosCursos || [], nivel);
+}
+
+function _actRelTipoChange(tipo) {
+  document.getElementById('act-rel-prob').style.display = tipo === 'prob' ? '' : 'none';
+  document.getElementById('act-rel-obj').style.display  = tipo === 'obj'  ? '' : 'none';
+}
+
+function _addEncuentro() {
+  _actEncuentros.push({ fecha: hoyISO(), hora: '', tematica: '' });
+  _renderEncuentrosExtra();
+}
+
+function _removeEncuentro(i) {
+  // Preserve current input values before splicing
+  _actEncuentros = _actEncuentros.map((enc, j) => ({
+    fecha:    getFechaInput('enc-fecha-' + j) || enc.fecha,
+    hora:     document.getElementById('enc-hora-' + j)?.value  || enc.hora,
+    tematica: document.getElementById('enc-tematica-extra-' + j)?.value || enc.tematica,
+  }));
+  _actEncuentros.splice(i, 1);
+  _renderEncuentrosExtra();
+}
+
+function _renderEncuentrosExtra() {
+  const cont = document.getElementById('enc-extras');
+  if (!cont) return;
+  cont.innerHTML = _actEncuentros.map((enc, i) => `
+    <div style="background:var(--surf);border:1px solid var(--brd);border-radius:var(--rad);padding:10px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:10px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px">Encuentro ${i + 2}</div>
+        <button type="button" onclick="_removeEncuentro(${i})" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--txt3);padding:0;line-height:1">×</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div><label class="lbl">Fecha *</label>${renderFechaInput('enc-fecha-' + i, enc.fecha)}</div>
+        <div><label class="lbl">Hora</label>
+          <input type="time" id="enc-hora-${i}" value="${enc.hora}" style="width:100%;border:1px solid var(--brd);border-radius:var(--rad);padding:8px;background:var(--surf);color:var(--txt)">
+        </div>
+      </div>
+      <div><label class="lbl">Temática</label>
+        <input type="text" id="enc-tematica-extra-${i}" value="${enc.tematica}" placeholder="Tema de este encuentro (opcional)">
+      </div>
+    </div>`).join('');
 }
 
 function _debounceActAlumno() {
@@ -1348,29 +1476,36 @@ async function _guardarActividad() {
   if (!tipo)   { alert('Seleccioná el tipo de actividad.'); return; }
   if (!fecha)  { alert('La fecha es obligatoria.'); return; }
 
-  const destTipo = document.querySelector('[name="act-dest-tipo"]:checked')?.value || 'curso';
+  const destTipo = document.querySelector('[name="act-dest-tipo"]:checked')?.value || 'nivel_completo';
   let destinatarios_ids   = null;
   let destinatarios_texto = null;
+  let nivel_destinatario  = null;
 
-  if (destTipo === 'curso') {
-    const cursoId = document.getElementById('act-curso')?.value || null;
-    if (cursoId) {
-      const cursoData = (window._actTodosCursos || []).find(c => c.id === cursoId);
-      destinatarios_ids = [cursoId];
-      if (cursoData) {
-        const lbl = [cursoData.anio ? cursoData.anio + '°' : '', cursoData.nombre, cursoData.division || ''].filter(Boolean).join(' ');
-        destinatarios_texto = `${lbl} · ${cursoData.nivel}`;
-      }
-    }
+  if (destTipo === 'nivel_completo') {
+    nivel_destinatario = document.getElementById('act-nivel-completo')?.value || null;
+    if (!nivel_destinatario) { alert('Seleccioná el nivel de los destinatarios.'); return; }
+    destinatarios_ids   = (window._actTodosCursos || []).filter(c => c.nivel === nivel_destinatario).map(c => c.id);
+    destinatarios_texto = `Nivel ${nivel_destinatario}`;
+  } else if (destTipo === 'cursos_multiples') {
+    const chks = [...document.querySelectorAll('.act-curso-chk:checked')];
+    if (!chks.length) { alert('Seleccioná al menos un curso.'); return; }
+    destinatarios_ids   = chks.map(c => c.value);
+    destinatarios_texto = chks.map(c => c.dataset.label).join(', ');
   } else {
     if (!_actAlumnosSel.length) { alert('Seleccioná al menos un alumno.'); return; }
     destinatarios_ids   = _actAlumnosSel.map(s => s.id);
     destinatarios_texto = `${_actAlumnosSel.length} alumno${_actAlumnosSel.length > 1 ? 's' : ''}`;
   }
 
-  const probId = document.getElementById('act-prob')?.value  || null;
-  const hora   = document.getElementById('act-hora')?.value  || null;
-  const desc   = document.getElementById('act-desc')?.value.trim() || null;
+  const relTipo    = document.querySelector('[name="act-rel-tipo"]:checked')?.value || '';
+  const probId     = relTipo === 'prob' ? (document.getElementById('act-prob')?.value    || null) : null;
+  const objetivoId = relTipo === 'obj'  ? (document.getElementById('act-objetivo')?.value || null) : null;
+  const hora       = document.getElementById('act-hora')?.value || null;
+  const lugar      = document.getElementById('act-lugar')?.value.trim() || null;
+  const objTxt     = document.getElementById('act-objetivo-txt')?.value.trim() || null;
+  const resultado  = document.getElementById('act-desc')?.value.trim() || null;
+  const enAgenda   = document.getElementById('act-en-agenda')?.classList.contains('on') || false;
+  const tematica0  = document.getElementById('enc-tematica-0')?.value.trim() || null;
 
   const btn = document.querySelector('#modal-act-eoe .btn-p');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
@@ -1381,12 +1516,18 @@ async function _guardarActividad() {
     titulo,
     fecha,
     hora:               hora || null,
-    descripcion:        desc,
+    lugar,
+    descripcion:        objTxt,
+    objetivo_actividad: objTxt,
+    resultado,
     tipo_actividad:     tipo,
-    problematica_id:    probId || null,
+    problematica_id:    probId     || null,
+    objetivo_id:        objetivoId || null,
     destinatarios_tipo: destTipo,
-    destinatarios_ids,
+    destinatarios_ids:  destinatarios_ids?.length ? destinatarios_ids : null,
     destinatarios_texto,
+    nivel_destinatario,
+    en_agenda:          enAgenda,
   }).select().single();
 
   if (error) {
@@ -1395,11 +1536,56 @@ async function _guardarActividad() {
     return;
   }
 
+  // Encuentros adicionales
+  const encRows = [];
+  if (tematica0 || hora) {
+    encRows.push({ reunion_id: nueva.id, fecha, hora: hora || null, tematica: tematica0, orden: 1 });
+  }
+  _actEncuentros.forEach((enc, i) => {
+    encRows.push({
+      reunion_id: nueva.id,
+      fecha:      getFechaInput('enc-fecha-' + i) || enc.fecha || fecha,
+      hora:       document.getElementById('enc-hora-' + i)?.value || null,
+      tematica:   document.getElementById('enc-tematica-extra-' + i)?.value?.trim() || null,
+      orden:      i + 2,
+    });
+  });
+  if (encRows.length) await sb.from('actividad_encuentros').insert(encRows);
+
+  // Invitados + notificaciones
   const invChks = [...document.querySelectorAll('.act-inv-chk:checked')];
   if (invChks.length) {
     await sb.from('reunion_invitados').insert(
       invChks.map(c => ({ reunion_id: nueva.id, usuario_id: c.value, estado: 'pendiente' }))
     );
+    const fechaStr = formatFechaCorta(fecha);
+    await sb.from('notificaciones').insert(
+      invChks.map(c => ({
+        usuario_id:       c.value,
+        tipo:             'invitacion_actividad_eoe',
+        titulo:           `Invitación: ${titulo}`,
+        descripcion:      `${_ACT_TIPO_LABEL[tipo] || tipo} · ${fechaStr}${hora ? ' · ' + hora.slice(0,5) : ''}${lugar ? ' · ' + lugar : ''} — Convoca ${USUARIO_ACTUAL.nombre_completo}`,
+        referencia_id:    nueva.id,
+        referencia_tabla: 'reuniones',
+      }))
+    );
+  }
+
+  // Agregar a agenda institucional
+  if (enAgenda) {
+    await sb.from('eventos_institucionales').insert({
+      institucion_id:      USUARIO_ACTUAL.institucion_id,
+      creado_por:          USUARIO_ACTUAL.id,
+      nombre:              titulo,
+      nivel:               nivel_destinatario || 'todos',
+      fecha_inicio:        fecha,
+      hora:                hora || null,
+      lugar,
+      descripcion:         objTxt || null,
+      convocatoria_grupos: [],
+      convocados_ids:      [],
+      responsables_ids:    [],
+    });
   }
 
   _cerrarModalObj('modal-act-eoe');
