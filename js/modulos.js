@@ -1055,7 +1055,7 @@ async function rEOE() {
         .in('tipo', ['emocional', 'familiar', 'salud'])
         .order('urgencia', { ascending: false }),
       sb.from('reuniones')
-        .select(`*, prob:problematicas(descripcion), obj:objetivos(titulo)`)
+        .select(`*, prob:problematicas(descripcion), obj:objetivos(nombre)`)
         .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
         .not('tipo_actividad', 'is', null)
         .order('fecha', { ascending: false })
@@ -1134,7 +1134,7 @@ function _renderActCard(a, hoy) {
   const tipoLabel = _ACT_TIPO_LABEL[a.tipo_actividad] || a.tipo_actividad;
   const hora      = a.hora ? a.hora.slice(0, 5) : '';
   const probDesc  = a.prob?.descripcion;
-  const objTit    = a.obj?.titulo;
+  const objTit    = a.obj?.nombre;
   const planTxt   = a.objetivo_actividad || a.descripcion;
   return `
     <div class="card" style="margin-bottom:8px${esPasada ? ';opacity:.75' : ''}">
@@ -1173,7 +1173,7 @@ async function _abrirFormActividad() {
     sb.from('problematicas').select('id,descripcion,alumno:alumnos(apellido,nombre)')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .neq('estado', 'resuelta').order('created_at', { ascending: false }).limit(50),
-    sb.from('objetivos').select('id,titulo')
+    sb.from('objetivos').select('id,nombre')
       .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
       .not('estado', 'eq', 'archivado').order('created_at', { ascending: false }).limit(50),
     sb.from('usuarios').select('id,nombre_completo,rol')
@@ -1200,7 +1200,7 @@ async function _abrirFormActividad() {
   }).join('');
 
   const objsOpts = objs.map(o =>
-    `<option value="${o.id}">${(o.titulo || 'Sin título').slice(0, 50)}</option>`
+    `<option value="${o.id}">${(o.nombre || 'Sin nombre').slice(0, 50)}</option>`
   ).join('');
 
   const invOpts = usrs.map(u => `
