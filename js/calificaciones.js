@@ -133,6 +133,70 @@ function renderSituacionCard(alumnos, getPromedio, prefijo, titulo, notaMin = 7,
     </div>`;
 }
 
+// Variante que clasifica por cantidad de materias desaprobadas (directivo/preceptor/EOE)
+function renderSituacionCardDesap(alumnos, getDesapCount, prefijo, titulo) {
+  const riesgo  = alumnos.filter(al => { const n = getDesapCount(al); return n !== null && n >= 3; });
+  const seguim  = alumnos.filter(al => { const n = getDesapCount(al); return n !== null && n === 2; });
+  const aldia   = alumnos.filter(al => { const n = getDesapCount(al); return n !== null && n <= 1; });
+  const sinNotas = alumnos.filter(al => getDesapCount(al) === null);
+
+  const listaHTML = (lista, color) => lista.map(al => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--brd)">
+      <div>
+        <div style="font-size:12px;font-weight:500">${al.apellido}, ${al.nombre}</div>
+        ${al.cursoNombre ? `<div style="font-size:10px;color:var(--txt2)">${al.cursoNombre}</div>` : ''}
+      </div>
+      <span style="font-size:11px;font-weight:600;color:${color}">${getDesapCount(al)} desap.</span>
+    </div>`).join('');
+
+  return `
+    <div style="margin-bottom:16px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt2);text-transform:uppercase;margin-bottom:10px">
+        ${titulo || 'Situación académica'}
+      </div>
+      <div class="metrics m3" style="margin-bottom:8px">
+        <div class="mc" style="background:var(--rojo-l);cursor:pointer;border:1.5px solid transparent"
+          onclick="toggleSit('${prefijo}riesgo')" title="Ver alumnos en riesgo">
+          <div class="mc-v" style="color:var(--rojo);font-size:20px">${riesgo.length}</div>
+          <div class="mc-l">En riesgo (3+ mat.)</div>
+        </div>
+        <div class="mc" style="background:var(--amb-l);cursor:pointer;border:1.5px solid transparent"
+          onclick="toggleSit('${prefijo}seguim')" title="Ver alumnos en seguimiento">
+          <div class="mc-v" style="color:var(--ambar);font-size:20px">${seguim.length}</div>
+          <div class="mc-l">Seguimiento (2 mat.)</div>
+        </div>
+        <div class="mc" style="background:var(--verde-l);cursor:pointer;border:1.5px solid transparent"
+          onclick="toggleSit('${prefijo}aldia')" title="Ver alumnos al día">
+          <div class="mc-v" style="color:var(--verde);font-size:20px">${aldia.length}</div>
+          <div class="mc-l">Al día (0–1 mat.)</div>
+        </div>
+      </div>
+      ${riesgo.length ? `
+      <div id="${prefijo}riesgo" style="display:none;margin-bottom:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--rojo);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          En riesgo <span style="font-weight:400;color:var(--txt2)">(${riesgo.length} alumnos)</span>
+        </div>
+        <div class="card" style="padding:8px 14px;border-left:3px solid var(--rojo)">${listaHTML(riesgo, 'var(--rojo)')}</div>
+      </div>` : ''}
+      ${seguim.length ? `
+      <div id="${prefijo}seguim" style="display:none;margin-bottom:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--ambar);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          En seguimiento <span style="font-weight:400;color:var(--txt2)">(${seguim.length} alumnos)</span>
+        </div>
+        <div class="card" style="padding:8px 14px;border-left:3px solid var(--ambar)">${listaHTML(seguim, 'var(--ambar)')}</div>
+      </div>` : ''}
+      ${aldia.length ? `
+      <div id="${prefijo}aldia" style="display:none;margin-bottom:8px">
+        <div style="font-size:10px;font-weight:700;color:var(--verde);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          Al día <span style="font-weight:400;color:var(--txt2)">(${aldia.length} alumnos)</span>
+        </div>
+        <div class="card" style="padding:8px 14px;border-left:3px solid var(--verde)">${listaHTML(aldia, 'var(--verde)')}</div>
+      </div>` : ''}
+      ${sinNotas.length ? `
+      <div style="font-size:10px;color:var(--txt3);margin-top:4px">${sinNotas.length} alumno(s) sin notas registradas</div>` : ''}
+    </div>`;
+}
+
 function toggleSit(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -1196,6 +1260,13 @@ async function rNotasDirectivo() {
   c.innerHTML = `
     <div class="pg-t">Calificaciones</div>
     <div class="pg-s">${rol === 'preceptor' ? 'Preceptoría' : 'Vista institucional'} · Solo lectura</div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:9px 13px;
+      background:var(--surf1);border-radius:8px;font-size:10px;color:var(--txt2);margin-bottom:14px;border:1px solid var(--brd)">
+      <span style="font-weight:600;color:var(--txt1);flex-shrink:0">Situación por alumno:</span>
+      <span><span style="color:var(--verde);font-weight:800">●</span>&ensp;Al día — 0 ó 1 mat. desaprobada</span>
+      <span><span style="color:var(--ambar);font-weight:800">●</span>&ensp;En seguimiento — 2 mat. desaprobadas</span>
+      <span><span style="color:var(--rojo);font-weight:800">●</span>&ensp;En riesgo — 3 o más mat. desaprobadas</span>
+    </div>
     ${rol === 'eoe' ? `
     <div style="margin-bottom:14px">
       <div style="position:relative">
@@ -1301,29 +1372,28 @@ async function _cargarSituacionDirectivoGlobal(cursos) {
     });
   }
 
-  const getPromedio = (al) => {
+  // Cuenta materias con promedio bajo el umbral de aprobación para un alumno
+  const getDesaprobadasCount = (al) => {
     const keys = Object.keys(notasPorAlumnoMateria).filter(k => k.startsWith(al.id + '_'));
     if (!keys.length) return null;
-    const proms = keys.map(k => {
+    const cu  = cursos.find(c => c.id === al.curso_id);
+    const min = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
+    return keys.filter(k => {
       const ns = notasPorAlumnoMateria[k];
-      return ns.reduce((a, b) => a + b, 0) / ns.length;
-    });
-    return proms.reduce((a, b) => a + b, 0) / proms.length;
+      return (ns.reduce((a, b) => a + b, 0) / ns.length) < min;
+    }).length;
   };
 
-  // Métricas por curso para las cards
+  // Métricas por curso para las cards: verde=0–1 desap, amarillo=2, rojo=3+
   const cursoStats = {};
   alumnos.forEach(al => {
     if (!cursoStats[al.curso_id]) cursoStats[al.curso_id] = { apr: 0, obs: 0, crit: 0, sin: 0 };
-    const promR = _redondearProm(getPromedio(al));
-    const cu    = cursos.find(c => c.id === al.curso_id);
-    const min   = CONFIG_NOTAS[cu?.nivel]?.nota_minima ?? 7;
-    const rec   = CONFIG_NOTAS[cu?.nivel]?.nota_recuperacion ?? 4;
+    const desap = getDesaprobadasCount(al);
     const st    = cursoStats[al.curso_id];
-    if (promR === null) st.sin++;
-    else if (promR >= min) st.apr++;
-    else if (promR >= rec) st.obs++;
-    else st.crit++;
+    if (desap === null) st.sin++;
+    else if (desap >= 3)  st.crit++;
+    else if (desap === 2) st.obs++;
+    else                  st.apr++;
   });
   Object.entries(cursoStats).forEach(([cId, st]) => {
     const el = document.getElementById(`card-stat-${cId}`);
@@ -1339,7 +1409,7 @@ async function _cargarSituacionDirectivoGlobal(cursos) {
   const primerPeriodoLabel = nivelesConCursos.length === 1
     ? (PERIODOS.find(p => p.id === periodosActivosPorNivel[nivelesConCursos[0]])?.nombre || 'Año en curso')
     : 'Período activo';
-  contenedor.innerHTML = renderSituacionCard(alumnosConCurso, getPromedio, 'dirg-', primerPeriodoLabel);
+  contenedor.innerHTML = renderSituacionCardDesap(alumnosConCurso, getDesaprobadasCount, 'dirg-', primerPeriodoLabel);
 }
 
 async function verCalifCurso(cursoId, nivel) {
@@ -1488,9 +1558,16 @@ async function verCalifCurso(cursoId, nivel) {
       ${tabBar}
       ${validacionPendHTML}
       ${!materias.length ? '<div class="empty-state">Sin materias configuradas</div>' : `
-      <div style="display:flex;justify-content:flex-end;gap:4px;margin-bottom:6px">
-        <button onclick="_scrollGrilla(-1)" style="background:var(--surf2);border:1px solid var(--brd);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:14px;color:var(--txt2)">◀</button>
-        <button onclick="_scrollGrilla(1)"  style="background:var(--surf2);border:1px solid var(--brd);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:14px;color:var(--txt2)">▶</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--txt2);align-items:center;flex-wrap:wrap">
+          <span style="font-weight:600;color:var(--txt1)">Filas:</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(192,57,43,.18);margin-right:3px;vertical-align:middle"></span>3+ mat. desaprobadas</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgba(245,176,65,.22);margin-right:3px;vertical-align:middle"></span>2 mat. desaprobadas</span>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button onclick="_scrollGrilla(-1)" style="background:var(--surf2);border:1px solid var(--brd);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:14px;color:var(--txt2)">◀</button>
+          <button onclick="_scrollGrilla(1)"  style="background:var(--surf2);border:1px solid var(--brd);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:14px;color:var(--txt2)">▶</button>
+        </div>
       </div>
       <div id="grilla-notas-wrap" style="overflow-x:auto">
         <table class="grilla-notas" style="table-layout:auto">
@@ -1520,16 +1597,17 @@ async function verCalifCurso(cursoId, nivel) {
           </thead>
           <tbody>
             ${alumnos.map(al => {
-              const enRiesgo = materias.filter(m => {
+              const _nMin = CONFIG_NOTAS[nivel]?.nota_minima ?? 7;
+              const desap = materias.filter(m => {
                 const p = promediosMap[al.id]?.[m.id];
-                return p !== null && p !== undefined && p < 7;
+                return p !== null && p !== undefined && p < _nMin;
               }).length;
+              const filaClass = desap >= 3 ? 'fila-riesgo' : desap === 2 ? 'fila-obs' : '';
               return `
-                <tr class="${enRiesgo >= 2 ? 'fila-riesgo' : ''}">
+                <tr class="${filaClass}">
                   <td style="font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;position:sticky;left:0;z-index:1;background:var(--bg);box-shadow:2px 0 4px rgba(0,0,0,.06)"
                     onclick="verAlumnoNotas('${al.id}','${cursoId}',null,'${PERIODO_SEL}')">
                     ${al.apellido}, ${al.nombre}
-                    ${enRiesgo >= 2 ? '<span class="tag tr" style="font-size:9px;margin-left:4px">Riesgo</span>' : ''}
                   </td>
                   ${materias.map(m => {
                     const prom = promediosMap[al.id]?.[m.id];
@@ -2703,7 +2781,8 @@ function inyectarEstilosNotas() {
     .nota-warn { background:var(--amb-l);   color:var(--ambar); }
     .nota-risk { background:var(--rojo-l);  color:var(--rojo);  }
     .nota-nd   { background:var(--gris-l);  color:var(--gris);  }
-    .fila-riesgo td { background:rgba(192,57,43,.06) !important; }
+    .fila-riesgo td { background:rgba(192,57,43,.08) !important; }
+    .fila-obs td    { background:rgba(245,176,65,.10) !important; }
     .curso-card-asist { cursor:pointer !important; }
     .periodo-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
     .periodo-tab {
