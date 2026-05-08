@@ -1047,69 +1047,35 @@ async function _importarTardanzas(objId) {
 async function rEOE() {
   showLoading('eoe');
   try {
-    const [probRes, actRes] = await Promise.all([
-      sb.from('problematicas')
-        .select(`*, alumno:alumnos(nombre,apellido,curso:cursos(nombre,division))`)
-        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-        .neq('estado', 'resuelta')
-        .in('tipo', ['emocional', 'familiar', 'salud'])
-        .order('urgencia', { ascending: false }),
-      sb.from('reuniones')
-        .select(`*, prob:problematicas(descripcion), obj:objetivos(nombre)`)
-        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-        .not('tipo_actividad', 'is', null)
-        .order('fecha', { ascending: false })
-        .limit(30),
-    ]);
-    if (probRes.error) throw probRes.error;
+    const actRes = await sb.from('reuniones')
+      .select(`*, prob:problematicas(descripcion), obj:objetivos(nombre)`)
+      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+      .not('tipo_actividad', 'is', null)
+      .order('fecha', { ascending: false });
+    if (actRes.error) throw actRes.error;
 
-    const casos      = probRes.data || [];
-    const actividades = actRes.error ? [] : (actRes.data || []);
-    const hoy        = hoyISO();
-    const esEOE      = USUARIO_ACTUAL.rol === 'eoe';
-    const puedeVer   = ['eoe', 'director_general', 'directivo_nivel'].includes(USUARIO_ACTUAL.rol);
+    const actividades = actRes.data || [];
+    const hoy  = hoyISO();
+    const esEOE = USUARIO_ACTUAL.rol === 'eoe';
+
+    const deHoy   = actividades.filter(a => a.fecha === hoy).length;
+    const proximas = actividades.filter(a => a.fecha > hoy).length;
+    const pasadas  = actividades.filter(a => a.fecha < hoy).length;
 
     const c = document.getElementById('page-eoe');
     c.innerHTML = `
-      <div class="pg-t">Panel EOE</div>
-      <div class="pg-s">Equipo de Orientación Escolar · ${INSTITUCION_ACTUAL?.nombre || ''}</div>
-      <div class="metrics m2" style="margin-bottom:14px">
-        <div class="mc"><div class="mc-v" style="color:var(--rojo)">${casos.filter(p => p.urgencia === 'alta').length}</div><div class="mc-l">Urgentes</div></div>
-        <div class="mc"><div class="mc-v" style="color:var(--ambar)">${casos.filter(p => p.urgencia === 'media').length}</div><div class="mc-l">Seguimiento</div></div>
+      <div class="pg-t">Actividades EOE</div>
+      <div class="pg-s">${INSTITUCION_ACTUAL?.nombre || ''}</div>
+      <div class="metrics m3" style="margin-bottom:14px">
+        <div class="mc"><div class="mc-v" style="color:var(--azul)">${deHoy}</div><div class="mc-l">Hoy</div></div>
+        <div class="mc"><div class="mc-v" style="color:var(--verde)">${proximas}</div><div class="mc-l">Próximas</div></div>
+        <div class="mc"><div class="mc-v" style="color:var(--txt3)">${pasadas}</div><div class="mc-l">Realizadas</div></div>
       </div>
-
-      <div class="sec-lb">Casos en seguimiento (${casos.length})</div>
-      ${!casos.length
-        ? '<div class="empty-state" style="margin-bottom:16px">🧠<br>Sin casos EOE activos</div>'
-        : casos.map(p => {
-            const ini = (p.alumno?.apellido?.[0] || '?') + (p.alumno?.nombre?.[0] || '');
-            const nom = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
-            const cur = p.alumno?.curso ? `${p.alumno.curso.nombre}${p.alumno.curso.division || ''}` : '—';
-            return `
-              <div class="caso-c u${p.urgencia?.[0] || 'm'}" style="cursor:pointer;margin-bottom:8px" onclick="EX='pr-${p.id}';goPage('prob')">
-                <div class="caso-top">
-                  <div class="av av32" style="background:var(--azul-l);color:var(--azul)">${ini}</div>
-                  <div style="flex:1;min-width:0">
-                    <div style="font-size:12px;font-weight:600">${nom}</div>
-                    <div style="font-size:10px;color:var(--txt2)">${cur} · ${labelTipo(p.tipo)} · ${tiempoDesde(p.created_at)}</div>
-                    <div style="margin-top:4px;display:flex;gap:4px">
-                      <span class="tag ${p.urgencia === 'alta' ? 'tr' : 'ta'}">Urgencia ${p.urgencia}</span>
-                      <span class="tag td">Confidencial</span>
-                    </div>
-                  </div>
-                  <span style="font-size:11px;color:var(--txt2)">›</span>
-                </div>
-              </div>`;
-          }).join('')}
-
-      ${puedeVer ? `
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--brd)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div class="sec-lb" style="margin:0">Actividades EOE (${actividades.length})</div>
-          ${esEOE ? `<button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva actividad</button>` : ''}
-        </div>
-        ${_renderActividadesEOE(actividades, hoy)}
-      </div>` : ''}`;
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:11px;color:var(--txt2)">${actividades.length} actividades en total</div>
+        ${esEOE ? `<button class="btn-p" onclick="_abrirFormActividad()">+ Nueva actividad</button>` : ''}
+      </div>
+      ${_renderActividadesEOE(actividades, hoy)}`;
   } catch(e) { showError('eoe', 'Error: ' + e.message); }
 }
 
@@ -1855,7 +1821,8 @@ async function _confirmarEliminarActividad(actId) {
 }
 
 async function _recargarActividadesEOE() {
-  if (CUR_PAGE === 'dash') await rDash();
+  if (CUR_PAGE === 'dash')   await rDash();
+  else if (CUR_PAGE === 'agenda') await rAgenda();
   else await rEOE();
 }
 

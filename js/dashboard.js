@@ -518,7 +518,7 @@ async function rDashEOE() {
   const sem    = _semanaActual();
   const hoy    = sem.hoy;
 
-  const [casosRes, alertasAsistRes, derivRes, eventosProxRes, actividadesRes, derivEOERes] = await Promise.all([
+  const [casosRes, alertasAsistRes, eventosProxRes, actividadesRes, derivEOERes] = await Promise.all([
     sb.from('problematicas')
       .select('id,tipo,urgencia,estado,created_at,alumno_id,alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division,nivel))')
       .eq('institucion_id', instId)
@@ -528,11 +528,6 @@ async function rDashEOE() {
       .select('alumno_id,tipo_alerta,total_faltas,alumnos(nombre,apellido,cursos(nombre,division,nivel))')
       .eq('institucion_id', instId)
       .order('tipo_alerta', { ascending: false }),
-    sb.from('derivaciones')
-      .select('id,tipo_servicio,institucion_destino,fecha_derivacion,estado,created_at,alumno:alumnos(nombre,apellido)')
-      .eq('institucion_id', instId)
-      .in('estado', ['pendiente','en_seguimiento'])
-      .order('fecha_derivacion'),
     sb.from('eventos_institucionales')
       .select('id,nombre,hora,fecha_inicio,lugar,nivel,convocados_ids,convocatoria_grupos')
       .eq('institucion_id', instId)
@@ -544,7 +539,7 @@ async function rDashEOE() {
       .eq('institucion_id', instId)
       .not('tipo_actividad', 'is', null)
       .order('fecha', { ascending: false })
-      .limit(30),
+      .limit(50),
     sb.from('intervenciones')
       .select('id,descripcion,created_at,problematica_id,prob:problematicas(id,tipo,institucion_id,alumno:alumnos(nombre,apellido,curso:cursos(nombre,division,nivel)))')
       .eq('tipo', 'derivacion_eoe')
@@ -554,7 +549,6 @@ async function rDashEOE() {
 
   const casos       = casosRes.data        || [];
   const alertasAsist= alertasAsistRes.data || [];
-  const derivaciones= derivRes.data        || [];
   const actividades = actividadesRes.data  || [];
   const derivEOE    = (derivEOERes.data    || []).filter(d => d.prob?.institucion_id === instId);
 
@@ -600,8 +594,7 @@ async function rDashEOE() {
     if (!porNivel[nv]) porNivel[nv] = [];
     porNivel[nv].push(p);
   });
-  const nivelesConCasos = _NIVELES_ORD.filter(n => porNivel[n])
-    .concat(Object.keys(porNivel).filter(n => !_NIVELES_ORD.includes(n)));
+  const nivelesConCasos = _NIVELES_ORD.filter(n => porNivel[n]);
 
   const casosHTML = casosUrgentes.length
     ? nivelesConCasos.map(nivel => {
@@ -675,33 +668,7 @@ async function rDashEOE() {
       + (derivEOE.length > 5 ? `<div style="font-size:10px;color:var(--azul);margin-top:4px">+ ${derivEOE.length - 5} más</div>` : '')
     : '<div style="font-size:11px;color:var(--verde);padding:8px 0">✅ Sin derivaciones pendientes de atención.</div>';
 
-  // ── Sección 3: Derivaciones en curso ──
-  const TIPO_SERV_LABEL = {
-    salud_mental:'Salud mental', hospital:'Hospital', trabajo_social:'Trabajo social',
-    justicia:'Justicia', educacion_especial:'Ed. especial', otro:'Otro',
-  };
-  const derivHTML = derivaciones.length ? derivaciones.map(d => {
-    const al    = d.alumno;
-    const nom   = al ? `${al.apellido}, ${al.nombre}` : '—';
-    const dias  = Math.floor((Date.now() - new Date(d.fecha_derivacion + 'T12:00:00').getTime()) / 86400000);
-    const estadoClr = d.estado === 'pendiente' ? 'var(--ambar)' : 'var(--azul)';
-    return `
-      <div class="card" style="padding:10px 14px;margin-bottom:6px;border-left:3px solid ${estadoClr}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:600">${nom}</div>
-            <div style="font-size:10px;color:var(--txt2)">${TIPO_SERV_LABEL[d.tipo_servicio] || d.tipo_servicio} → ${d.institucion_destino}</div>
-          </div>
-          <span class="tag ${d.estado === 'pendiente' ? 'ta' : 'tp'}" style="font-size:9px;flex-shrink:0">
-            ${d.estado === 'pendiente' ? 'Pendiente' : 'En seguimiento'}
-          </span>
-        </div>
-        <div style="font-size:10px;color:var(--txt3);margin-top:4px">${dias}d sin respuesta · ${formatFechaLatam(d.fecha_derivacion)}</div>
-      </div>`;
-  }).join('')
-  : '<div style="font-size:11px;color:var(--verde);padding:10px 0">✅ Sin derivaciones en curso.</div>';
-
-  // ── Sección 4: Próximas actividades ──
+  // ── Sección 3: Próximas actividades (agenda institucional) ──
   const actHTML = eventosEOE.length ? eventosEOE.map(e => {
     const nc = NIVEL_CONFIG[e.nivel] || NIVEL_CONFIG.todos;
     return `
@@ -715,11 +682,25 @@ async function rDashEOE() {
   }).join('')
   : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin actividades próximas.</div>';
 
+  // ── Actividades EOE: hoy y próximas ──
+  const hoyActs  = actividades.filter(a => a.fecha === hoy).sort((a, b) => (a.hora||'').localeCompare(b.hora||''));
+  const proxActs = actividades.filter(a => a.fecha > hoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const pasadasCount = actividades.filter(a => a.fecha < hoy).length;
+
+  const actHoyHTML = hoyActs.length
+    ? hoyActs.map(a => _renderActCard(a, hoy)).join('')
+    : '<div style="font-size:11px;color:var(--txt2);padding:6px 0">Sin actividades para hoy.</div>';
+
+  const actProxHTML = proxActs.length
+    ? proxActs.slice(0, 5).map(a => _renderActCard(a, hoy)).join('')
+      + (proxActs.length > 5 ? `<div style="font-size:10px;color:var(--verde);margin-top:4px">+ ${proxActs.length - 5} más → <span style="cursor:pointer;text-decoration:underline" onclick="goPage('eoe')">Ver todas</span></div>` : '')
+    : '<div style="font-size:11px;color:var(--txt2);padding:6px 0">Sin actividades próximas.</div>';
+
   document.getElementById('page-dash').innerHTML = `
     <div class="pg-t">${saludo}, ${apellido} 👋</div>
     <div class="pg-s" style="margin-bottom:14px">${_fechaStr()} · Orientación Escolar</div>
 
-    <div class="metrics m4" style="margin-bottom:14px">
+    <div class="metrics m3" style="margin-bottom:14px">
       <div class="mc" style="cursor:pointer" onclick="goPage('prob')">
         <div class="mc-v" style="color:var(--rojo)">${casosUrgentes.length}</div>
         <div class="mc-l">URGENTES</div>
@@ -728,12 +709,8 @@ async function rDashEOE() {
         <div class="mc-v" style="color:var(--ambar)">${casos.length}</div>
         <div class="mc-l">ACTIVOS</div>
       </div>
-      <div class="mc">
+      <div class="mc" style="cursor:pointer" onclick="document.getElementById('deriv-eoe-sec')?.scrollIntoView({behavior:'smooth'})">
         <div class="mc-v" style="color:var(--azul)">${derivEOE.length}</div>
-        <div class="mc-l">RECIBIDOS</div>
-      </div>
-      <div class="mc">
-        <div class="mc-v" style="color:var(--txt2)">${derivaciones.length}</div>
         <div class="mc-l">DERIVACIONES</div>
       </div>
     </div>
@@ -747,47 +724,48 @@ async function rDashEOE() {
         </div>
         ${casosHTML}
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
-          <div class="sec-lb" style="margin:0">Derivados al EOE</div>
+        <div id="deriv-eoe-sec" style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
+          <div class="sec-lb" style="margin:0">Derivaciones recibidas</div>
         </div>
         ${derivEOEHTML}
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
-          <div class="sec-lb" style="margin:0">⚠️ En riesgo sin seguimiento</div>
+          <div class="sec-lb" style="margin:0">En riesgo sin seguimiento</div>
         </div>
         ${riesgoHTML}
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
-          <div class="sec-lb" style="margin:0">Derivaciones en curso</div>
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--brd)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div class="sec-lb" style="margin:0">Actividades · Hoy</div>
+            <button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva</button>
+          </div>
+          ${actHoyHTML}
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px">
+            <div class="sec-lb" style="margin:0">Próximas</div>
+          </div>
+          ${actProxHTML}
+
+          ${pasadasCount > 0 ? `
+          <div class="card" style="margin-top:10px;padding:10px 14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="goPage('eoe')">
+            <div>
+              <div style="font-size:11px;font-weight:600">Actividades anteriores</div>
+              <div style="font-size:10px;color:var(--txt2)">${pasadasCount} actividades realizadas</div>
+            </div>
+            <span style="font-size:16px;color:var(--txt3)">›</span>
+          </div>` : ''}
         </div>
-        ${derivHTML}
 
       </div>
       <div class="dash-col-r">
         <div class="card" style="padding:14px">
-          <div class="sec-lb" style="margin:0 0 10px">Próximas actividades</div>
+          <div class="sec-lb" style="margin:0 0 10px">Próximos eventos</div>
           ${actHTML}
           <div style="margin-top:8px">
             <button class="btn-ghost" onclick="goPage('agenda')" style="font-size:11px">Ver agenda →</button>
           </div>
         </div>
       </div>
-    </div>
-
-    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--brd)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="sec-lb" style="margin:0">Actividades de hoy</div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <button class="btn-ghost" style="font-size:11px" onclick="goPage('eoe')">Ver todas →</button>
-          <button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva</button>
-        </div>
-      </div>
-      ${(() => {
-        const hoyActs = actividades.filter(a => a.fecha === hoy);
-        return hoyActs.length
-          ? hoyActs.map(a => _renderActCard(a, hoy)).join('')
-          : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin actividades para hoy.</div>';
-      })()}
     </div>`;
 
   inyectarEstilosDash();

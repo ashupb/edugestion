@@ -42,6 +42,7 @@ const NAV_CONFIG = {
     { id:'notas',    icon:'≡',  label:'Calificaciones' },
     { id:'intensif', icon:'◈',  label:'Intensificación' },
     { sec: 'Orientación' },
+    { id:'eoe',     icon:'▦',  label:'Actividades' },
     { id:'prob',    icon:'△',  label:'Problemáticas' },
     { id:'leg',     icon:'▤',  label:'Resumen del estudiante' },
     { id:'obj',     icon:'◎',  label:'Objetivos' },
