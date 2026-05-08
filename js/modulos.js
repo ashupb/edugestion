@@ -1086,7 +1086,7 @@ async function rEOE() {
             const nom = p.alumno ? `${p.alumno.apellido}, ${p.alumno.nombre}` : '—';
             const cur = p.alumno?.curso ? `${p.alumno.curso.nombre}${p.alumno.curso.division || ''}` : '—';
             return `
-              <div class="caso-c u${p.urgencia?.[0] || 'm'}" style="cursor:pointer;margin-bottom:8px" onclick="goPage('prob')">
+              <div class="caso-c u${p.urgencia?.[0] || 'm'}" style="cursor:pointer;margin-bottom:8px" onclick="EX='pr-${p.id}';goPage('prob')">
                 <div class="caso-top">
                   <div class="av av32" style="background:var(--azul-l);color:var(--azul)">${ini}</div>
                   <div style="flex:1;min-width:0">
@@ -1593,17 +1593,23 @@ async function _guardarActividad() {
 
 function _renderActividadesEOE(actividades, hoy) {
   if (!actividades.length) return '<div class="empty-state">📋<br>Sin actividades registradas</div>';
-  const proximas = actividades.filter(a => a.fecha >= hoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
-  const pasadas  = actividades.filter(a => a.fecha < hoy);
+  const deHoy   = actividades.filter(a => a.fecha === hoy).sort((a, b) => (a.hora||'').localeCompare(b.hora||''));
+  const proximas = actividades.filter(a => a.fecha > hoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const pasadas  = actividades.filter(a => a.fecha < hoy).sort((a, b) => b.fecha.localeCompare(a.fecha));
   let out = '';
+  if (deHoy.length) {
+    out += `<div style="font-size:10px;font-weight:600;color:var(--azul);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Hoy</div>`;
+    out += deHoy.map(a => _renderActCard(a, hoy)).join('');
+  }
   if (proximas.length) {
-    out += `<div style="font-size:10px;font-weight:600;color:var(--verde);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Próximas</div>`;
+    out += `<div style="font-size:10px;font-weight:600;color:var(--verde);text-transform:uppercase;letter-spacing:.5px;margin:${deHoy.length ? '12px' : '0'} 0 6px">Próximas</div>`;
     out += proximas.map(a => _renderActCard(a, hoy)).join('');
   }
   if (pasadas.length) {
-    out += `<div style="font-size:10px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin:${proximas.length ? '12px' : '0'} 0 6px">Realizadas</div>`;
+    out += `<div style="font-size:10px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;margin:${deHoy.length||proximas.length ? '12px' : '0'} 0 6px">Realizadas</div>`;
     out += pasadas.map(a => _renderActCard(a, hoy)).join('');
   }
+  if (!out) return '<div class="empty-state">📋<br>Sin actividades registradas</div>';
   return out;
 }
 

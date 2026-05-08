@@ -518,7 +518,7 @@ async function rDashEOE() {
   const sem    = _semanaActual();
   const hoy    = sem.hoy;
 
-  const [casosRes, alertasAsistRes, derivRes, eventosProxRes, actividadesRes] = await Promise.all([
+  const [casosRes, alertasAsistRes, derivRes, eventosProxRes, actividadesRes, derivEOERes] = await Promise.all([
     sb.from('problematicas')
       .select('id,tipo,urgencia,estado,created_at,alumno_id,alumno:alumnos(id,nombre,apellido,curso:cursos(nombre,division,nivel))')
       .eq('institucion_id', instId)
@@ -545,12 +545,18 @@ async function rDashEOE() {
       .not('tipo_actividad', 'is', null)
       .order('fecha', { ascending: false })
       .limit(30),
+    sb.from('intervenciones')
+      .select('id,descripcion,created_at,problematica_id,prob:problematicas(id,tipo,institucion_id,alumno:alumnos(nombre,apellido,curso:cursos(nombre,division,nivel)))')
+      .eq('tipo', 'derivacion_eoe')
+      .order('created_at', { ascending: false })
+      .limit(50),
   ]);
 
   const casos       = casosRes.data        || [];
   const alertasAsist= alertasAsistRes.data || [];
   const derivaciones= derivRes.data        || [];
   const actividades = actividadesRes.data  || [];
+  const derivEOE    = (derivEOERes.data    || []).filter(d => d.prob?.institucion_id === instId);
 
   // Última intervención por caso
   const casosIds = casos.map(p => p.id);
@@ -579,39 +585,53 @@ async function rDashEOE() {
 
   const { saludo, apellido } = _saludo(USUARIO_ACTUAL.nombre_completo);
 
-  // ── Sección 1: Casos activos ──
+  // ── Sección 1: Casos urgentes (alta) por nivel ──
   const casosOrdenados = [...casos].sort((a, b) => {
     const dA = lastIntervMap[a.id] ? new Date(lastIntervMap[a.id]) : new Date(a.created_at);
     const dB = lastIntervMap[b.id] ? new Date(lastIntervMap[b.id]) : new Date(b.created_at);
-    return dA - dB; // más silenciosos primero
+    return dA - dB;
   });
 
-  const casosHTML = casosOrdenados.length ? casosOrdenados.map(p => {
-    const al    = p.alumno;
-    const cu    = al?.curso;
-    const nom   = al ? `${al.apellido}, ${al.nombre}` : '—';
-    const cur   = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '—';
-    const base  = lastIntervMap[p.id] ? new Date(lastIntervMap[p.id]) : new Date(p.created_at);
-    const dias  = Math.floor((Date.now() - base.getTime()) / 86400000);
-    const alerta= dias > 14;
-    const urgCls= p.urgencia === 'alta' ? 'tr' : p.urgencia === 'media' ? 'ta' : 'tg';
-    return `
-      <div class="card" style="padding:10px 14px;margin-bottom:6px;border-left:3px solid ${alerta ? 'var(--rojo)' : 'var(--brd)'}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:600">${nom}</div>
-            <div style="font-size:10px;color:var(--txt2)">${cur}</div>
-          </div>
-          <span class="tag ${urgCls}" style="font-size:9px;flex-shrink:0">Urg. ${p.urgencia}</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
-          <span style="font-size:10px;color:${alerta ? 'var(--rojo)' : dias > 7 ? 'var(--ambar)' : 'var(--txt3)'}">
-            ${dias === 0 ? 'Hoy' : `${dias}d sin intervención`}
-          </span>
-          <button class="btn-ghost" style="font-size:10px;padding:2px 6px" onclick="goPage('prob')">Ver →</button>
-        </div>
-      </div>`;
-  }).join('') : '<div style="font-size:11px;color:var(--txt2);padding:10px 0">Sin casos activos.</div>';
+  const casosUrgentes = casosOrdenados.filter(p => p.urgencia === 'alta');
+  const _NIVELES_ORD  = ['inicial', 'primario', 'secundario', 'terciario'];
+  const porNivel      = {};
+  casosUrgentes.forEach(p => {
+    const nv = p.alumno?.curso?.nivel || 'otro';
+    if (!porNivel[nv]) porNivel[nv] = [];
+    porNivel[nv].push(p);
+  });
+  const nivelesConCasos = _NIVELES_ORD.filter(n => porNivel[n])
+    .concat(Object.keys(porNivel).filter(n => !_NIVELES_ORD.includes(n)));
+
+  const casosHTML = casosUrgentes.length
+    ? nivelesConCasos.map(nivel => {
+        const nc = NIVEL_CONFIG[nivel] || { color: 'var(--rojo)', label: nivel };
+        return `
+          <div style="margin-bottom:10px">
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;color:${nc.color};letter-spacing:.5px;margin-bottom:4px">${nc.label}</div>
+            ${porNivel[nivel].map(p => {
+              const al   = p.alumno;
+              const cu   = al?.curso;
+              const nom  = al ? `${al.apellido}, ${al.nombre}` : '—';
+              const cur  = cu ? `${cu.nombre}${cu.division || ''}` : '—';
+              const base = lastIntervMap[p.id] ? new Date(lastIntervMap[p.id]) : new Date(p.created_at);
+              const dias = Math.floor((Date.now() - base.getTime()) / 86400000);
+              const alerta = dias > 14;
+              return `
+                <div class="card" style="padding:8px 12px;margin-bottom:4px;border-left:3px solid ${alerta ? 'var(--rojo)' : 'var(--brd)'}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <div style="flex:1;min-width:0">
+                      <div style="font-size:11px;font-weight:600">${nom}</div>
+                      <div style="font-size:10px;color:var(--txt2)">${cur}</div>
+                    </div>
+                    <button class="btn-ghost" style="font-size:10px;padding:2px 6px;flex-shrink:0" onclick="EX='pr-${p.id}';goPage('prob')">Ver →</button>
+                  </div>
+                  ${dias > 0 ? `<div style="font-size:10px;color:${alerta ? 'var(--rojo)' : dias > 7 ? 'var(--ambar)' : 'var(--txt3)'};margin-top:3px">${dias}d sin intervención</div>` : ''}
+                </div>`;
+            }).join('')}
+          </div>`;
+      }).join('')
+    : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin casos urgentes activos.</div>';
 
   // ── Sección 2: En riesgo sin problematica ──
   const riesgoHTML = enRiesgoSinProb.length ? enRiesgoSinProb.slice(0, 6).map(a => {
@@ -630,6 +650,30 @@ async function rDashEOE() {
       </div>`;
   }).join('') + (enRiesgoSinProb.length > 6 ? `<div style="font-size:10px;color:var(--verde);margin-top:4px">+ ${enRiesgoSinProb.length - 6} más</div>` : '')
   : '<div style="font-size:11px;color:var(--verde);padding:10px 0">✅ Sin alumnos en riesgo sin seguimiento.</div>';
+
+  // ── Sección 2b: Derivados internamente al EOE ──
+  const derivEOEHTML = derivEOE.length
+    ? derivEOE.slice(0, 5).map(d => {
+        const al  = d.prob?.alumno;
+        const nom = al ? `${al.apellido}, ${al.nombre}` : '—';
+        const cu  = al?.curso;
+        const cur = cu ? `${cu.nombre}${cu.division || ''} · ${cu.nivel}` : '—';
+        const dias = Math.floor((Date.now() - new Date(d.created_at).getTime()) / 86400000);
+        return `
+          <div class="card" style="padding:8px 12px;margin-bottom:4px;border-left:3px solid var(--azul)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11px;font-weight:600">${nom}</div>
+                <div style="font-size:10px;color:var(--txt2)">${cur}</div>
+              </div>
+              <button class="btn-ghost" style="font-size:10px;padding:2px 6px;flex-shrink:0" onclick="EX='pr-${d.prob?.id}';goPage('prob')">Ver →</button>
+            </div>
+            ${d.descripcion ? `<div style="font-size:10px;color:var(--txt2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.descripcion}</div>` : ''}
+            <div style="font-size:10px;color:var(--txt3);margin-top:2px">${dias === 0 ? 'Hoy' : `Hace ${dias}d`}</div>
+          </div>`;
+      }).join('')
+      + (derivEOE.length > 5 ? `<div style="font-size:10px;color:var(--azul);margin-top:4px">+ ${derivEOE.length - 5} más</div>` : '')
+    : '<div style="font-size:11px;color:var(--verde);padding:8px 0">✅ Sin derivaciones pendientes de atención.</div>';
 
   // ── Sección 3: Derivaciones en curso ──
   const TIPO_SERV_LABEL = {
@@ -675,17 +719,21 @@ async function rDashEOE() {
     <div class="pg-t">${saludo}, ${apellido} 👋</div>
     <div class="pg-s" style="margin-bottom:14px">${_fechaStr()} · Orientación Escolar</div>
 
-    <div class="metrics m3" style="margin-bottom:14px">
+    <div class="metrics m4" style="margin-bottom:14px">
       <div class="mc" style="cursor:pointer" onclick="goPage('prob')">
-        <div class="mc-v" style="color:var(--rojo)">${casos.filter(p => p.urgencia === 'alta').length}</div>
+        <div class="mc-v" style="color:var(--rojo)">${casosUrgentes.length}</div>
         <div class="mc-l">URGENTES</div>
       </div>
       <div class="mc" style="cursor:pointer" onclick="goPage('prob')">
         <div class="mc-v" style="color:var(--ambar)">${casos.length}</div>
-        <div class="mc-l">CASOS ACTIVOS</div>
+        <div class="mc-l">ACTIVOS</div>
       </div>
       <div class="mc">
-        <div class="mc-v" style="color:var(--azul)">${derivaciones.length}</div>
+        <div class="mc-v" style="color:var(--azul)">${derivEOE.length}</div>
+        <div class="mc-l">RECIBIDOS</div>
+      </div>
+      <div class="mc">
+        <div class="mc-v" style="color:var(--txt2)">${derivaciones.length}</div>
         <div class="mc-l">DERIVACIONES</div>
       </div>
     </div>
@@ -694,17 +742,22 @@ async function rDashEOE() {
       <div class="dash-col-l">
 
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div class="sec-lb" style="margin:0">Casos activos</div>
+          <div class="sec-lb" style="margin:0">Casos urgentes</div>
           <button class="btn-ghost" onclick="goPage('prob')" style="font-size:11px">Ver todos →</button>
         </div>
         ${casosHTML}
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
+          <div class="sec-lb" style="margin:0">Derivados al EOE</div>
+        </div>
+        ${derivEOEHTML}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
           <div class="sec-lb" style="margin:0">⚠️ En riesgo sin seguimiento</div>
         </div>
         ${riesgoHTML}
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
           <div class="sec-lb" style="margin:0">Derivaciones en curso</div>
         </div>
         ${derivHTML}
@@ -723,10 +776,18 @@ async function rDashEOE() {
 
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--brd)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="sec-lb" style="margin:0">Actividades EOE (${actividades.length})</div>
-        <button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva actividad</button>
+        <div class="sec-lb" style="margin:0">Actividades de hoy</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn-ghost" style="font-size:11px" onclick="goPage('eoe')">Ver todas →</button>
+          <button class="btn-p" style="font-size:11px" onclick="_abrirFormActividad()">+ Nueva</button>
+        </div>
       </div>
-      ${_renderActividadesEOE(actividades, hoy)}
+      ${(() => {
+        const hoyActs = actividades.filter(a => a.fecha === hoy);
+        return hoyActs.length
+          ? hoyActs.map(a => _renderActCard(a, hoy)).join('')
+          : '<div style="font-size:11px;color:var(--txt2);padding:8px 0">Sin actividades para hoy.</div>';
+      })()}
     </div>`;
 
   inyectarEstilosDash();
