@@ -1,5 +1,5 @@
 -- =============================================================
--- RESET DATOS — Kairu Demo
+-- RESET DATOS — Kairú Demo
 -- Borra datos de alumnos, asistencia, notas, actividades EOE
 -- y registros transaccionales.
 -- CONSERVA: institución, usuarios, tipos y configuración.
@@ -37,14 +37,15 @@ DECLARE
     'materias_estado_alumno',
     'asistencia',
     'asistencias',
+    'ia_uso',
     'notificaciones',
     'cierres_curso_cuatrimestre',
     'cierres_materia_cuatrimestre',
     'cierres_periodo',
-    'periodos_intensificacion',
-    'periodos_evaluativos',
     'calificaciones',
     'instancias_evaluativas',
+    'periodos_intensificacion',
+    'periodos_evaluativos',
     -- Nivel 2: dependen de lo anterior
     'objetivos',
     'reuniones',

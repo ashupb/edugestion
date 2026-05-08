@@ -92,6 +92,7 @@ async function login() {
       USUARIO_ACTUAL.rol = 'directivo_nivel';
     }
 
+
     // Si aún no tiene institución asignada → pantalla de configuración inicial
     if (!USUARIO_ACTUAL.institucion_id) {
       iniciarSetupInstitucional();
@@ -157,6 +158,7 @@ async function verificarSesion() {
       USUARIO_ACTUAL.rol_display = USUARIO_ACTUAL.rol;
       USUARIO_ACTUAL.rol = 'directivo_nivel';
     }
+
 
     // Si aún no tiene institución asignada → pantalla de configuración inicial
     if (!USUARIO_ACTUAL.institucion_id) {

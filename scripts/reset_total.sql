@@ -1,5 +1,5 @@
 -- =============================================================
--- RESET TOTAL — Kairu Demo
+-- RESET TOTAL — Kairú Demo
 -- Borra TODOS los datos: alumnos, actividades, institución,
 -- usuarios (perfiles) y configuración.
 -- La cuenta de Auth (email/contraseña) NO se toca.
@@ -37,14 +37,15 @@ DECLARE
     'materias_estado_alumno',
     'asistencia',
     'asistencias',
+    'ia_uso',
     'notificaciones',
     'cierres_curso_cuatrimestre',
     'cierres_materia_cuatrimestre',
     'cierres_periodo',
-    'periodos_intensificacion',
-    'periodos_evaluativos',
     'calificaciones',
     'instancias_evaluativas',
+    'periodos_intensificacion',
+    'periodos_evaluativos',
     -- Nivel 2: dependen de lo anterior
     'objetivos',
     'reuniones',

@@ -1,5 +1,5 @@
 -- =============================================================
--- SEED DEMO — Kairu
+-- SEED DEMO — Kairú
 -- Crea la institución demo y vincula el usuario admin.
 -- Ejecutar DESPUÉS de reset_total.sql
 --

@@ -319,7 +319,7 @@ async function _guardarInstitucion() {
   const pgSub  = document.querySelector('#page-admin .pg-s');
   if (sbInst) sbInst.textContent = nombre;
   if (pgSub)  pgSub.textContent  = nombre;
-  document.title = nombre + ' · Kairu';
+  document.title = nombre + ' · Kairú';
 
   _toastOk('Cambios guardados correctamente');
 

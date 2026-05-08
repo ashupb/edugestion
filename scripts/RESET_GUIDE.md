@@ -1,4 +1,4 @@
-# Guía de reset y configuración de demo — Kairu
+# Guía de reset y configuración de demo — Kairú
 
 Proceso para limpiar datos de prueba y dejar la app lista para una demo o para que una institución real empiece a cargar sus datos.
 
@@ -17,7 +17,7 @@ Proceso para limpiar datos de prueba y dejar la app lista para una demo o para q
 
 ### Paso 1 — Reset total
 
-1. Ir a [Supabase](https://supabase.com) → proyecto Kairu → **SQL Editor**
+1. Ir a [Supabase](https://supabase.com) → proyecto Kairú → **SQL Editor**
 2. Abrir y ejecutar `scripts/reset_total.sql`
 3. Verificar que el resultado diga `Reset total completado` y que los NOTICE muestren `OK` para las tablas existentes
 

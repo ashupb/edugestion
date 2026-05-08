@@ -9,6 +9,6 @@ const SUPABASE_ANON_KEY = 'sb_publishable_99GO4UBXXyv7NPAEs2JCkg__SkwuWbu';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const APP_CONFIG = {
-  nombre:  'Kairu',
+  nombre:  'Kairú',
   version: '1.0.0-mvp',
 };
