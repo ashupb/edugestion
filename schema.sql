@@ -54,7 +54,7 @@ create table problematicas (
   institucion_id uuid references instituciones(id),
   alumno_id uuid references alumnos(id),
   registrado_por uuid references usuarios(id),
-  tipo text check (tipo in ('convivencia','emocional','familiar','aprendizaje','salud','conducta','otro')),
+  tipo text,
   urgencia text check (urgencia in ('alta','media','baja')) default 'media',
   descripcion text not null,
   estado text check (estado in ('abierta','en_seguimiento','resuelta','derivada')) default 'abierta',
@@ -71,7 +71,7 @@ create table intervenciones (
   registrado_por uuid references usuarios(id),
   titulo text not null,
   descripcion text not null,
-  tipo text check (tipo in ('entrevista_alumno','reunion_familia','derivacion','llamado','reunion_equipo','otro')),
+  tipo text,
   proximo_paso text,
   created_at timestamptz default now()
 );
