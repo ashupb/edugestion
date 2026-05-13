@@ -614,6 +614,14 @@ body.dark .coming-soon-card { border-color: rgba(255,255,255,0.06); }
 /* ── Texto vacío ─────────────────────────────────────────────────── */
 .empty-msg { font-size: 13px; color: var(--color-text-muted); text-align: center; padding: 8px 0 4px; }
 
+/* ── Seguimiento: chips de resumen por ciclo ─────────────────────── */
+.seg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.seg-chip { font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-pill); }
+.seg-chip--verde { background: var(--color-success-bg); color: var(--color-success); }
+.seg-chip--rojo  { background: var(--color-danger-bg);  color: var(--color-danger);  }
+.seg-chip--ambar { background: var(--color-warning-bg); color: var(--color-warning); }
+.seg-chip--azul  { background: var(--color-info-bg);    color: var(--color-info);    }
+
 /* ── Password toggle ────────────────────────────────────────────── */
 .form-input-wrap { position: relative; }
 .form-input-wrap .form-input { padding-right: 42px; }
