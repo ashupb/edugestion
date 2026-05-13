@@ -47,11 +47,11 @@ async function rSeguimiento() {
   try {
     const [califRes, trayRes] = await Promise.all([
       // Calificaciones individuales: unir con materia, instancia y período
+      // Filtro ausente en JS (no en query) para incluir filas con ausente=null
       sb.from('calificaciones')
         .select('nota, ausente, materia_id, materias(nombre), instancias_evaluativas(nombre), periodos_intensificacion(tipo, ciclo_lectivo)')
         .eq('alumno_id', alumnoId)
-        .not('nota', 'is', null)
-        .eq('ausente', false),
+        .not('nota', 'is', null),
 
       // Estado histórico de materias (cierres de cuatrimestre / año / intensificación)
       sb.from('materias_estado_alumno')
