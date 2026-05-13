@@ -622,6 +622,24 @@ body.dark .coming-soon-card { border-color: rgba(255,255,255,0.06); }
 .seg-chip--ambar { background: var(--color-warning-bg); color: var(--color-warning); }
 .seg-chip--azul  { background: var(--color-info-bg);    color: var(--color-info);    }
 
+/* ── Calificaciones: materia rows y badges de nota ───────────────── */
+.seg-mat-item { padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+body.dark .seg-mat-item { border-bottom-color: rgba(255,255,255,0.05); }
+.seg-mat-item:last-child { border-bottom: none; padding-bottom: 0; }
+.seg-mat-item:first-child { padding-top: 0; }
+.seg-mat-nombre { font-size: 13px; font-weight: 600; color: var(--color-dark); margin-bottom: 6px; }
+body.dark .seg-mat-nombre { color: var(--color-white); }
+.seg-periodo-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.seg-periodo-lbl { font-size: 11px; color: var(--color-text-muted); min-width: 130px; flex-shrink: 0; }
+.seg-notas-wrap  { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.nota-bdg { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 22px; padding: 0 6px; border-radius: 6px;
+  font-size: 11px; font-weight: 700; }
+.nota-bdg--verde { background: var(--color-success-bg); color: var(--color-success); }
+.nota-bdg--ambar { background: var(--color-warning-bg); color: var(--color-warning); }
+.nota-bdg--rojo  { background: var(--color-danger-bg);  color: var(--color-danger);  }
+.nota-bdg--prom  { margin-left: 4px; border: 1.5px solid currentColor; background: transparent; }
+
 /* ── Password toggle ────────────────────────────────────────────── */
 .form-input-wrap { position: relative; }
 .form-input-wrap .form-input { padding-right: 42px; }
