@@ -686,7 +686,19 @@ body.dark .feed-item { border-bottom-color: rgba(255,255,255,0.05); }
 /* ── Comunicados page ───────────────────────────────────────────── */
 .com-card { padding: 0; overflow: hidden; margin-bottom: 12px; }
 .com-card--unread { border-left: 3px solid var(--color-green); }
-.com-img { display: block; width: 100%; max-height: 280px; object-fit: cover; }
+
+/* Landscape / default: ancho completo, ratio natural, sin recorte */
+.com-img { display: block; width: 100%; height: auto; }
+
+/* Portrait (detectado vía onload): layout columna, imagen a la derecha */
+.com-card--portrait { display: flex; flex-direction: row; }
+.com-card--portrait .com-img {
+  width: 38%; max-width: 160px;
+  align-self: stretch; object-fit: cover; flex-shrink: 0;
+  order: 2;
+}
+.com-card--portrait .com-body { flex: 1; min-width: 0; order: 1; }
+
 .com-body { padding: 14px 16px 16px; }
 .com-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .com-fecha { font-size: 11px; color: var(--color-text-muted); margin-left: auto; }

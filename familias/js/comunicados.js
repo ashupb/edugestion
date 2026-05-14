@@ -78,7 +78,8 @@ function _comCard(c, leidosIds) {
 
   return `
     <div class="card com-card${sinLeer ? ' com-card--unread' : ''}">
-      ${c.imagen_url ? `<img class="com-img" src="${c.imagen_url}" alt="" loading="lazy">` : ''}
+      ${c.imagen_url ? `<img class="com-img" src="${c.imagen_url}" alt="" loading="lazy"
+        onload="this.closest('.com-card').classList.toggle('com-card--portrait', this.naturalHeight > this.naturalWidth * 1.15)">` : ''}
       <div class="com-body">
         <div class="com-meta">
           <span class="badge badge-success">${nivelTxt}</span>
