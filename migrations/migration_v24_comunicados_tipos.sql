@@ -10,8 +10,16 @@ ALTER TABLE public.comunicados
 CREATE INDEX IF NOT EXISTS comunicados_curso_idx
   ON public.comunicados(curso_id);
 
--- 2. Renombrar tipo existente: los comunicados actuales eran novedades institucionales
+-- 2. Eliminar constraint antigua que bloqueaba el renombrado del tipo
+--    (la constraint exigía curso_id para tipos distintos de 'institucional')
+ALTER TABLE public.comunicados DROP CONSTRAINT IF EXISTS com_aula_requiere_curso;
+
+-- 3. Renombrar tipo existente: los comunicados actuales eran novedades institucionales
 UPDATE public.comunicados SET tipo = 'novedad' WHERE tipo = 'institucional';
+
+-- 4. Nueva constraint: solo los comunicados por curso requieren curso_id
+ALTER TABLE public.comunicados ADD CONSTRAINT com_aula_requiere_curso
+  CHECK (tipo != 'comunicado' OR curso_id IS NOT NULL);
 
 -- Resultado de valores de tipo:
 --   'novedad'     → Novedades institucionales (con imágenes, por nivel, sin campana)
