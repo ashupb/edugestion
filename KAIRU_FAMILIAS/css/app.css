@@ -640,6 +640,168 @@ body.dark .seg-mat-nombre { color: var(--color-white); }
 .nota-bdg--rojo  { background: var(--color-danger-bg);  color: var(--color-danger);  }
 .nota-bdg--prom  { margin-left: 4px; border: 1.5px solid currentColor; background: transparent; }
 
+/* ── Feed de novedades institucionales (inicio) ─────────────────── */
+.feed-items { display: flex; flex-direction: column; }
+
+.feed-item {
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+body.dark .feed-item { border-bottom-color: rgba(255,255,255,0.05); }
+.feed-item:active { opacity: 0.7; }
+.feed-item:last-child { border-bottom: none; padding-bottom: 0; }
+.feed-item:first-child { padding-top: 0; }
+
+.feed-img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  background: rgba(0,0,0,0.03);
+}
+body.dark .feed-img { background: rgba(255,255,255,0.04); }
+
+/* Feed carousel — múltiples imágenes */
+.feed-car-wrap { position: relative; margin-bottom: 10px; border-radius: var(--radius-md); overflow: hidden; }
+.feed-car { display: flex; overflow-x: scroll; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.feed-car::-webkit-scrollbar { display: none; }
+.feed-car-slide { flex: 0 0 100%; }
+.feed-car-slide img { display: block; width: 100%; height: 200px; object-fit: contain; background: rgba(0,0,0,0.03); }
+body.dark .feed-car-slide img { background: rgba(255,255,255,0.04); }
+.feed-car-btn {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  background: rgba(0,0,0,0.42); color: #fff; border: none;
+  width: 30px; height: 30px; border-radius: 50%;
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2; transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.feed-car-btn:active { background: rgba(0,0,0,0.65); }
+.feed-car-btn--prev { left: 6px; }
+.feed-car-btn--next { right: 6px; }
+.feed-car-dots { display: flex; justify-content: center; gap: 5px; padding: 6px 0 0; }
+.feed-car-dot { width: 5px; height: 5px; border-radius: 50%; background: rgba(0,0,0,0.18); transition: background 0.15s; }
+.feed-car-dot.active { background: var(--color-green); }
+body.dark .feed-car-dot { background: rgba(255,255,255,0.2); }
+body.dark .feed-car-dot.active { background: var(--color-green); }
+
+.feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.feed-date { font-size: 11px; color: var(--color-text-muted); flex: 1; text-align: right; }
+.feed-unread {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--color-danger);
+  flex-shrink: 0;
+}
+
+.feed-title {
+  font-size: 14px; font-weight: 700; color: var(--color-dark);
+  letter-spacing: -0.01em; line-height: 1.3;
+  margin-bottom: 4px;
+}
+.feed-excerpt { font-size: 12px; color: var(--color-text-medium); line-height: 1.45; }
+
+/* ── Tabs genéricos (familias) ──────────────────────────────────── */
+.tab-bar { display: flex; border-bottom: 1.5px solid rgba(0,0,0,0.07); margin-bottom: 16px; }
+body.dark .tab-bar { border-bottom-color: rgba(255,255,255,0.08); }
+.tab-btn {
+  flex: 1; padding: 10px 6px; font-size: 13px; font-weight: 600;
+  color: var(--color-text-muted); border: none; background: transparent;
+  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1.5px;
+  transition: color 0.15s, border-color 0.15s; letter-spacing: 0.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-btn.active { color: var(--color-green); border-bottom-color: var(--color-green); }
+
+/* ── Badge variantes ────────────────────────────────────────────── */
+.badge-com {
+  display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 10px;
+  font-weight: 700; letter-spacing: 0.04em;
+  background: rgba(59,130,246,0.12); color: #2563eb;
+}
+body.dark .badge-com { background: rgba(59,130,246,0.2); color: #60a5fa; }
+
+/* ── Comunicado texto (sin imagen, en familias) ─────────────────── */
+.com-text-card { padding: 14px 16px; margin-bottom: 10px; }
+.com-text-card .com-titulo { margin-bottom: 6px; }
+.com-text-cuerpo { font-size: 13px; color: var(--color-text-medium); line-height: 1.55; }
+
+/* ── Comunicados page ───────────────────────────────────────────── */
+.com-card { display: flex; flex-direction: row; align-items: stretch; padding: 0; overflow: hidden; margin-bottom: 10px; }
+.com-card--unread { border-left: 3px solid var(--color-green); }
+
+/* Columna izquierda: cuadrado de imagen */
+.com-thumb { width: 100px; min-width: 100px; flex-shrink: 0; height: 110px; background: rgba(0,0,0,0.04); position: relative; overflow: hidden; }
+body.dark .com-thumb { background: rgba(255,255,255,0.06); }
+.com-thumb > img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.com-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 26px; opacity: 0.2; }
+
+/* Mini carousel dentro de la card */
+.com-thumb-car { display: flex; overflow-x: scroll; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; width: 100%; height: 100%; scrollbar-width: none; }
+.com-thumb-car::-webkit-scrollbar { display: none; }
+.com-thumb-car img { flex: 0 0 100%; width: 100%; height: 100%; object-fit: contain; scroll-snap-align: start; display: block; }
+.com-thumb-dots { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; pointer-events: none; }
+.com-thumb-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,0.95); box-shadow: 0 0 2px rgba(0,0,0,0.4); opacity: 0.5; transition: opacity 0.15s; }
+.com-thumb-dot.active { opacity: 1; }
+
+/* Columna derecha: texto */
+.com-body { flex: 1; min-width: 0; padding: 10px 13px 12px; }
+.com-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.com-fecha { font-size: 10px; color: var(--color-text-muted); margin-left: auto; }
+.com-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-danger); flex-shrink: 0; }
+.com-titulo { font-size: 14px; font-weight: 700; color: var(--color-dark); line-height: 1.3; letter-spacing: -0.01em; margin-bottom: 4px; }
+.com-excerpt {
+  font-size: 12px; color: var(--color-text-medium); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.com-autor { font-size: 10px; color: var(--color-text-muted); margin-top: 6px; font-style: italic; }
+.com-card { cursor: pointer; }
+.com-card:active { opacity: 0.85; }
+
+/* ── Comunicado detalle ─────────────────────────────────────────── */
+.com-det-back {
+  background: none; border: none; padding: 4px 0; margin-bottom: 12px;
+  font-size: 14px; font-weight: 600; color: var(--color-primary);
+  cursor: pointer; display: block;
+}
+.com-det-imgs { margin-bottom: 12px; border-radius: var(--radius); overflow: hidden; }
+.com-det-carousel {
+  display: flex; overflow-x: scroll;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.com-det-carousel::-webkit-scrollbar { display: none; }
+.com-det-slide { flex: 0 0 100%; scroll-snap-align: start; }
+.com-det-slide img { width: 100%; max-height: 340px; height: auto; object-fit: contain; background: rgba(0,0,0,0.04); display: block; }
+.com-det-dots {
+  display: flex; justify-content: center; gap: 6px; padding: 8px 0;
+  background: var(--card-bg);
+}
+.com-det-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-text-muted); opacity: 0.4; cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
+}
+.com-det-dot.active { opacity: 1; background: var(--color-primary); }
+.com-det-body { padding: 16px; }
+.com-det-titulo {
+  font-size: 18px; font-weight: 700; color: var(--color-dark);
+  line-height: 1.3; margin-bottom: 10px;
+}
+.com-det-cuerpo {
+  font-size: 14px; color: var(--color-text-medium);
+  line-height: 1.65; white-space: pre-wrap;
+}
+
 /* ── Password toggle ────────────────────────────────────────────── */
 .form-input-wrap { position: relative; }
 .form-input-wrap .form-input { padding-right: 42px; }

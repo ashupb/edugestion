@@ -1,78 +1,63 @@
 // =====================================================
-// COMUNICADOS.JS — Avisos institucionales (familias)
+// COMUNICADOS.JS — Comunicados por curso (familias)
+// Solo texto, con notificación de campana
 // =====================================================
 
-const _COM_NIVEL_LABEL = { inicial: 'Inicial', primario: 'Primario', secundario: 'Secundario' };
 let _COM_DATA = [];
 
 async function rComunicados() {
   showLoading('comunicados');
   const el = document.getElementById('page-comunicados');
 
+  const cursoId = ALUMNO_ACTUAL?.cursos?.id;
+
   try {
-    const nivelAlumno = ALUMNO_ACTUAL?.cursos?.nivel;
-    const nivelFilter = nivelAlumno
-      ? `nivel.is.null,nivel.eq.${nivelAlumno}`
-      : 'nivel.is.null';
-
-    // Intentar con join a comunicado_imagenes; si la tabla no existe aún, caer sin imágenes múltiples
-    let data, error;
-    ({ data, error } = await sb
-      .from('comunicados')
-      .select('id, titulo, cuerpo, imagen_url, nivel, created_at, usuarios(nombre_completo), comunicado_imagenes(id, imagen_url, orden)')
-      .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
-      .eq('tipo', 'institucional')
-      .or(nivelFilter)
-      .order('created_at', { ascending: false })
-      .limit(30));
-
-    if (error) {
-      // Fallback sin join (tabla comunicado_imagenes todavía no existe en BD)
-      ({ data, error } = await sb
-        .from('comunicados')
-        .select('id, titulo, cuerpo, imagen_url, nivel, created_at, usuarios(nombre_completo)')
-        .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
-        .eq('tipo', 'institucional')
-        .or(nivelFilter)
-        .order('created_at', { ascending: false })
-        .limit(30));
+    if (!cursoId) {
+      el.innerHTML = `
+        <div class="page-body">
+          <div class="page-header"><h1 class="page-title">Comunicados</h1></div>
+          <div class="card"><p class="empty-msg">No hay información del curso del alumno.</p></div>
+        </div>`;
+      return;
     }
+
+    const { data, error } = await sb
+      .from('comunicados')
+      .select('id, titulo, cuerpo, created_at, usuarios(nombre_completo), cursos(id, nombre, division, nivel)')
+      .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
+      .eq('tipo', 'comunicado')
+      .eq('curso_id', cursoId)
+      .order('created_at', { ascending: false })
+      .limit(30);
 
     if (error) throw error;
 
-    const comunicados = (data || []).map(c => ({
-      ...c,
-      comunicado_imagenes: (c.comunicado_imagenes || []).sort((a, b) => a.orden - b.orden),
-    }));
-    _COM_DATA = comunicados;
+    _COM_DATA = data || [];
 
     // Lecturas previas
     let leidosIds = new Set();
-    if (comunicados.length) {
+    if (_COM_DATA.length) {
       const { data: lecturas } = await sb
         .from('comunicado_lecturas')
         .select('comunicado_id')
         .eq('usuario_id', USUARIO_FAMILIAR.id)
-        .in('comunicado_id', comunicados.map(c => c.id));
+        .in('comunicado_id', _COM_DATA.map(c => c.id));
       leidosIds = new Set((lecturas || []).map(l => l.comunicado_id));
     }
 
     el.innerHTML = `
-      <div class="page-body" id="com-lista">
+      <div class="page-body">
         <div class="page-header">
-          <h1 class="page-title">Avisos</h1>
+          <h1 class="page-title">Comunicados</h1>
         </div>
-        ${comunicados.length === 0
-          ? `<div class="card"><p class="empty-msg">No hay avisos publicados aún.</p></div>`
-          : comunicados.map(c => _comCard(c, leidosIds)).join('')
+        ${_COM_DATA.length === 0
+          ? `<div class="card"><p class="empty-msg">No hay comunicados del curso aún.</p></div>`
+          : _COM_DATA.map(c => _comCardText(c, leidosIds)).join('')
         }
-      </div>
-      <div id="com-detalle" style="display:none"></div>`;
+      </div>`;
 
-    _comInitThumbCarousels(comunicados);
-
-    // Marcar no leídos como leídos (post-render, no bloquea la UI)
-    const noLeidos = comunicados.filter(c => !leidosIds.has(c.id));
+    // Marcar como leídos → actualiza campana
+    const noLeidos = _COM_DATA.filter(c => !leidosIds.has(c.id));
     if (noLeidos.length) {
       await sb.from('comunicado_lecturas').upsert(
         noLeidos.map(c => ({ comunicado_id: c.id, usuario_id: USUARIO_FAMILIAR.id })),
@@ -85,148 +70,29 @@ async function rComunicados() {
     el.innerHTML = `
       <div class="page-body">
         <div class="alert-card alert-danger">
-          <p>No se pudieron cargar los avisos. Intentá de nuevo.</p>
+          <p>No se pudieron cargar los comunicados. Intentá de nuevo.</p>
         </div>
       </div>`;
   }
 }
 
-// Devuelve array de URLs de imágenes, preferiendo la tabla nueva
-function _comImgs(c) {
-  if (c.comunicado_imagenes?.length) return c.comunicado_imagenes.map(i => i.imagen_url);
-  if (c.imagen_url) return [c.imagen_url];
-  return [];
-}
-
-function _comCard(c, leidosIds) {
-  const sinLeer  = !leidosIds.has(c.id);
-  const nivelTxt = c.nivel
-    ? (_COM_NIVEL_LABEL[c.nivel] || c.nivel).toUpperCase()
-    : 'TODOS LOS NIVELES';
+function _comCardText(c, leidosIds) {
+  const sinLeer = !leidosIds.has(c.id);
+  const cur = c.cursos;
+  const cursoTxt = cur
+    ? `${cur.nombre}${cur.division ? ' ' + cur.division : ''}`
+    : 'Comunicado';
   const autor = c.usuarios?.nombre_completo || '';
-  const imgs  = _comImgs(c);
-
-  let thumbHtml;
-  if (imgs.length === 0) {
-    thumbHtml = `<div class="com-thumb-empty">📢</div>`;
-  } else if (imgs.length === 1) {
-    thumbHtml = `<img src="${imgs[0]}" alt="" loading="lazy">`;
-  } else {
-    thumbHtml = `
-      <div class="com-thumb-car" id="com-tc-${c.id}">
-        ${imgs.map(url => `<img src="${url}" alt="" loading="lazy">`).join('')}
-      </div>
-      <div class="com-thumb-dots" id="com-td-${c.id}">
-        ${imgs.map((_, i) => `<span class="com-thumb-dot${i === 0 ? ' active' : ''}"></span>`).join('')}
-      </div>`;
-  }
 
   return `
-    <div class="card com-card${sinLeer ? ' com-card--unread' : ''}" onclick="_comVerDetalle('${c.id}')">
-      <div class="com-thumb">
-        ${thumbHtml}
+    <div class="card com-text-card${sinLeer ? ' com-card--unread' : ''}">
+      <div class="com-meta" style="margin-bottom:8px">
+        <span class="badge badge-com">${cursoTxt}</span>
+        ${sinLeer ? '<span class="com-new-dot"></span>' : ''}
+        <span class="com-fecha">${fechaRelativa(c.created_at)}</span>
       </div>
-      <div class="com-body">
-        <div class="com-meta">
-          <span class="badge badge-success">${nivelTxt}</span>
-          ${sinLeer ? '<span class="com-new-dot"></span>' : ''}
-          <span class="com-fecha">${fechaRelativa(c.created_at)}</span>
-        </div>
-        <p class="com-titulo">${c.titulo}</p>
-        ${c.cuerpo ? `<p class="com-excerpt">${c.cuerpo}</p>` : ''}
-        ${autor ? `<p class="com-autor">— ${autor}</p>` : ''}
-      </div>
+      <p class="com-titulo">${c.titulo}</p>
+      ${c.cuerpo ? `<p class="com-text-cuerpo">${c.cuerpo.replace(/\n/g, '<br>')}</p>` : ''}
+      ${autor ? `<p class="com-autor" style="margin-top:10px">— ${autor}</p>` : ''}
     </div>`;
-}
-
-// ── Vista detalle ────────────────────────────────────────────────
-function _comVerDetalle(id) {
-  const c = _COM_DATA.find(x => x.id === id);
-  if (!c) return;
-
-  const imgs    = _comImgs(c);
-  const nivelTxt = c.nivel
-    ? (_COM_NIVEL_LABEL[c.nivel] || c.nivel).toUpperCase()
-    : 'TODOS LOS NIVELES';
-  const autor = c.usuarios?.nombre_completo || '';
-
-  const carouselHtml = imgs.length ? `
-    <div class="com-det-imgs">
-      <div class="com-det-carousel" id="com-det-car-${id}">
-        ${imgs.map((url, i) => `
-          <div class="com-det-slide">
-            <img src="${url}" alt="Imagen ${i + 1}" loading="lazy">
-          </div>`).join('')}
-      </div>
-      ${imgs.length > 1 ? `
-        <div class="com-det-dots" id="com-det-dots-${id}">
-          ${imgs.map((_, i) => `<span class="com-det-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></span>`).join('')}
-        </div>` : ''}
-    </div>` : '';
-
-  const lista = document.getElementById('com-lista');
-  const det   = document.getElementById('com-detalle');
-  lista.style.display = 'none';
-  det.style.display   = '';
-  det.innerHTML = `
-    <div class="page-body">
-      <button class="com-det-back" onclick="_comCerrarDetalle()">← Volver</button>
-      ${carouselHtml}
-      <div class="card com-det-body">
-        <div class="com-meta" style="margin-bottom:10px">
-          <span class="badge badge-success">${nivelTxt}</span>
-          <span class="com-fecha">${fechaRelativa(c.created_at)}</span>
-        </div>
-        <h2 class="com-det-titulo">${c.titulo}</h2>
-        ${c.cuerpo ? `<p class="com-det-cuerpo">${c.cuerpo.replace(/\n/g, '<br>')}</p>` : ''}
-        ${autor ? `<p class="com-autor" style="margin-top:16px">— ${autor}</p>` : ''}
-      </div>
-    </div>`;
-
-  if (imgs.length > 1) _comInitCarousel(id);
-}
-
-function _comCerrarDetalle() {
-  const det   = document.getElementById('com-detalle');
-  const lista = document.getElementById('com-lista');
-  if (det)   { det.style.display = 'none'; det.innerHTML = ''; }
-  if (lista) lista.style.display = '';
-}
-
-function _comInitThumbCarousels(comunicados) {
-  comunicados.forEach(c => {
-    if (_comImgs(c).length <= 1) return;
-    const car  = document.getElementById(`com-tc-${c.id}`);
-    const wrap = document.getElementById(`com-td-${c.id}`);
-    if (!car || !wrap) return;
-    const dots = wrap.querySelectorAll('.com-thumb-dot');
-    car.addEventListener('scroll', () => {
-      const idx = Math.round(car.scrollLeft / car.offsetWidth);
-      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-    }, { passive: true });
-  });
-}
-
-function _comInitCarousel(id) {
-  const carousel = document.getElementById(`com-det-car-${id}`);
-  if (!carousel) return;
-  const dotsWrap = document.getElementById(`com-det-dots-${id}`);
-  const dots = dotsWrap ? dotsWrap.querySelectorAll('.com-det-dot') : [];
-  let current = 0;
-
-  function goTo(idx) {
-    current = idx;
-    carousel.scrollTo({ left: carousel.offsetWidth * idx, behavior: 'smooth' });
-    dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-  }
-
-  dots.forEach(dot => dot.addEventListener('click', () => goTo(+dot.dataset.idx)));
-
-  carousel.addEventListener('scroll', () => {
-    const idx = Math.round(carousel.scrollLeft / carousel.offsetWidth);
-    if (idx !== current) {
-      current = idx;
-      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-    }
-  }, { passive: true });
 }

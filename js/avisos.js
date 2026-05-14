@@ -1,112 +1,159 @@
 // =====================================================
-// AVISOS.JS — Comunicados institucionales a familias
+// AVISOS.JS — Comunicación interna (Novedades + Comunicados)
 // =====================================================
 
-let _AVISOS_DATA = [];
+let _AVISOS_DATA    = [];   // novedades
+let _COM_INT_DATA   = [];   // comunicados por curso
+let _COM_INT_CURSOS = [];   // cursos disponibles para selector
+let _AVISOS_TAB     = 'novedades';
+const _AV_NIVEL_LABEL = { inicial: 'Inicial', primario: 'Primario', secundario: 'Secundario' };
 
 async function rAvisos() {
   const el = document.getElementById('page-avisos');
   if (!el) return;
-
   showLoading('avisos');
-
   const perms = _avisosPermisos();
 
   try {
-    const { data, error } = await sb
-      .from('comunicados')
-      .select('id, titulo, cuerpo, nivel, imagen_url, created_at, usuarios(nombre_completo), comunicado_imagenes(id, imagen_url, orden)')
-      .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
-      .eq('tipo', 'institucional')
-      .order('created_at', { ascending: false })
-      .limit(40);
+    // Fetch novedades, comunicados y cursos en paralelo
+    const [novRes, comRes, curRes] = await Promise.all([
+      sb.from('comunicados')
+        .select('id, titulo, cuerpo, nivel, imagen_url, created_at, usuarios(nombre_completo), comunicado_imagenes(id, imagen_url, orden)')
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .eq('tipo', 'novedad')
+        .order('created_at', { ascending: false })
+        .limit(40),
+      sb.from('comunicados')
+        .select('id, titulo, cuerpo, curso_id, created_at, usuarios(nombre_completo), cursos(id, nombre, division, nivel)')
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .eq('tipo', 'comunicado')
+        .order('created_at', { ascending: false })
+        .limit(40),
+      sb.from('cursos')
+        .select('id, nombre, division, nivel')
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .order('nivel').order('nombre'),
+    ]);
 
-    if (error) throw error;
+    // Si el join de comunicado_imagenes falla (tabla no existe aún), reintentar sin join
+    let novedades = novRes.data || [];
+    if (novRes.error) {
+      const { data: nov2 } = await sb
+        .from('comunicados')
+        .select('id, titulo, cuerpo, nivel, imagen_url, created_at, usuarios(nombre_completo)')
+        .eq('institucion_id', USUARIO_ACTUAL.institucion_id)
+        .eq('tipo', 'novedad')
+        .order('created_at', { ascending: false })
+        .limit(40);
+      novedades = nov2 || [];
+    } else {
+      novedades = novedades.map(c => ({
+        ...c,
+        comunicado_imagenes: (c.comunicado_imagenes || []).sort((a, b) => a.orden - b.orden),
+      }));
+    }
 
-    const comunicados = (data || []).map(c => ({
-      ...c,
-      comunicado_imagenes: (c.comunicado_imagenes || []).sort((a, b) => a.orden - b.orden),
-    }));
-    _AVISOS_DATA = comunicados;
+    _AVISOS_DATA    = novedades;
+    _COM_INT_DATA   = comRes.data || [];
+    _COM_INT_CURSOS = curRes.data || [];
+    _AVISOS_TAB     = 'novedades';
 
     el.innerHTML = `
       <div style="max-width:860px;margin:0 auto;padding:20px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px">
-          <h2 style="font-size:18px;font-weight:700;color:var(--txt)">Comunicados institucionales</h2>
-          ${perms.crear ? `<button class="btn-p" onclick="_avisosAbrirForm()">+ Nuevo comunicado</button>` : ''}
+          <h2 style="font-size:18px;font-weight:700;color:var(--txt)">Comunicación interna</h2>
+          ${perms.crear ? `<button class="btn-p" id="av-btn-nuevo" onclick="_avisosAbrirForm()">+ Nuevo</button>` : ''}
+        </div>
+
+        <div style="display:flex;border-bottom:1.5px solid var(--brd);margin-bottom:16px">
+          <button id="av-tab-novedades" onclick="_avisosTab('novedades')" style="${_tabStyle(true)}">Novedades</button>
+          <button id="av-tab-comunicados" onclick="_avisosTab('comunicados')" style="${_tabStyle(false)}">Comunicados</button>
         </div>
 
         <div id="av-form-wrap"></div>
 
-        <div id="av-lista">
-          ${_avisosListaHtml(comunicados, perms)}
+        <div id="av-pane-novedades">
+          ${_avisosNovListaHtml(novedades, perms)}
+        </div>
+        <div id="av-pane-comunicados" style="display:none">
+          ${_avisosComListaHtml(_COM_INT_DATA, perms)}
         </div>
       </div>`;
 
   } catch (e) {
-    el.innerHTML = `
-      <div style="padding:60px;text-align:center;color:var(--txt3)">
-        No se pudieron cargar los comunicados. Intentá de nuevo.
-      </div>`;
+    el.innerHTML = `<div style="padding:60px;text-align:center;color:var(--txt3)">No se pudo cargar la comunicación. Intentá de nuevo.</div>`;
   }
+}
+
+// ── Tabs ──────────────────────────────────────────────
+function _tabStyle(active) {
+  return `flex:1;padding:10px 6px;font-size:13px;font-weight:600;border:none;background:transparent;cursor:pointer;border-bottom:2px solid ${active ? 'var(--green)' : 'transparent'};color:${active ? 'var(--green)' : 'var(--txt2)'};margin-bottom:-1.5px;transition:color .15s,border-color .15s`;
+}
+
+function _avisosTab(tab) {
+  _AVISOS_TAB = tab;
+  document.getElementById('av-pane-novedades').style.display  = tab === 'novedades'  ? '' : 'none';
+  document.getElementById('av-pane-comunicados').style.display = tab === 'comunicados' ? '' : 'none';
+  document.getElementById('av-tab-novedades').style.cssText   = _tabStyle(tab === 'novedades');
+  document.getElementById('av-tab-comunicados').style.cssText = _tabStyle(tab === 'comunicados');
+  const formWrap = document.getElementById('av-form-wrap');
+  if (formWrap) formWrap.innerHTML = '';
 }
 
 // ── Permisos ──────────────────────────────────────────
 function _avisosPermisos() {
   const rol = USUARIO_ACTUAL?.rol;
-  return {
-    crear: ['director_general', 'directivo_nivel'].includes(rol),
-  };
+  return { crear: ['director_general', 'directivo_nivel', 'preceptor'].includes(rol) };
 }
 
-// ── Formulario nuevo comunicado ───────────────────────
+// ── Abrir formulario (decide tipo según tab activo) ───
 function _avisosAbrirForm() {
   const wrap = document.getElementById('av-form-wrap');
   if (!wrap) return;
   if (wrap.innerHTML) { wrap.innerHTML = ''; return; }
+  if (_AVISOS_TAB === 'comunicados') _avisosFormComunicado();
+  else _avisosFormNovedad();
+}
+
+// ── Form: nueva / editar novedad ──────────────────────
+function _avisosFormNovedad(editData = null) {
+  const wrap = document.getElementById('av-form-wrap');
+  if (!wrap) return;
+  const c = editData;
+  const isEdit = !!c;
+
+  const imgsActualesHtml = isEdit ? _avisosEditImgsHtml(c) : '';
 
   wrap.innerHTML = `
     <div class="card" style="margin-bottom:16px">
-      <div class="card-t">Nuevo comunicado</div>
-
+      <div class="card-t">${isEdit ? 'Editar novedad' : 'Nueva novedad'}</div>
       <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">
-          NIVEL DESTINATARIO
-        </label>
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">NIVEL DESTINATARIO</label>
         <select id="av-nivel">
-          <option value="">Todos los niveles de la institución</option>
-          <option value="inicial">Solo Inicial</option>
-          <option value="primario">Solo Primario</option>
-          <option value="secundario">Solo Secundario</option>
+          <option value="">Todos los niveles</option>
+          <option value="inicial"    ${c?.nivel==='inicial'    ?'selected':''}>Solo Inicial</option>
+          <option value="primario"   ${c?.nivel==='primario'   ?'selected':''}>Solo Primario</option>
+          <option value="secundario" ${c?.nivel==='secundario' ?'selected':''}>Solo Secundario</option>
         </select>
       </div>
-
       <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">
-          TÍTULO *
-        </label>
-        <input type="text" id="av-titulo" placeholder="Ej: Festejo del Día del Maestro" maxlength="120">
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">TÍTULO *</label>
+        <input type="text" id="av-titulo" value="${c?.titulo||''}" placeholder="Título de la novedad" maxlength="120">
       </div>
-
       <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">
-          MENSAJE *
-        </label>
-        <textarea id="av-cuerpo" rows="4" placeholder="Escribí el mensaje para las familias..." style="resize:vertical"></textarea>
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">MENSAJE</label>
+        <textarea id="av-cuerpo" rows="3" placeholder="Descripción opcional..." style="resize:vertical">${c?.cuerpo||''}</textarea>
       </div>
-
+      ${imgsActualesHtml}
       <div style="margin-bottom:16px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">
-          IMÁGENES (opcional — podés seleccionar varias)
-        </label>
-        <input type="file" id="av-imagen" accept="image/*" multiple
-          onchange="_avisosPreview(this)"
-          style="font-size:12px;width:100%;padding:0">
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">${isEdit ? 'AGREGAR IMÁGENES' : 'IMÁGENES (opcional — podés seleccionar varias)'}</label>
+        <input type="file" id="av-imagen" accept="image/*" multiple onchange="_avisosPreview(this)" style="font-size:12px;width:100%;padding:0">
         <div id="av-preview-wrap" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
       </div>
-
       <div class="acc">
-        <button class="btn-p" id="av-btn-pub" onclick="_avisosGuardar()">Publicar comunicado</button>
+        <button class="btn-p" id="av-btn-pub" onclick="${isEdit ? `_avisosGuardarEdicion('${c.id}')` : '_avisosGuardar()'}">
+          ${isEdit ? 'Guardar cambios' : 'Publicar novedad'}
+        </button>
         <button class="btn-s" onclick="document.getElementById('av-form-wrap').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
@@ -114,6 +161,69 @@ function _avisosAbrirForm() {
   document.getElementById('av-titulo')?.focus();
 }
 
+function _avisosEditImgsHtml(c) {
+  const imgs = c.comunicado_imagenes?.length
+    ? c.comunicado_imagenes
+    : (c.imagen_url ? [{ id: null, imagen_url: c.imagen_url }] : []);
+  if (!imgs.length) return '';
+  return `
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">IMÁGENES ACTUALES</label>
+      <div id="av-e-imgs-list-${c.id}" style="display:flex;flex-wrap:wrap;gap:8px">
+        ${imgs.map(img => img.id ? `
+          <div id="av-img-${img.id}" style="position:relative">
+            <img src="${img.imagen_url}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:var(--rad);display:block">
+            <button onclick="_avisosEliminarImagen('${img.id}','${img.imagen_url}','${c.id}')"
+              style="position:absolute;top:2px;right:2px;background:#d63b2f;border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
+          </div>` : `
+          <img src="${img.imagen_url}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:var(--rad)">`
+        ).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Form: nuevo / editar comunicado de curso ──────────
+function _avisosFormComunicado(editData = null) {
+  const wrap = document.getElementById('av-form-wrap');
+  if (!wrap) return;
+  const c = editData;
+  const isEdit = !!c;
+
+  const cursosOpts = _COM_INT_CURSOS.map(cu => {
+    const nombre = `${cu.nombre}${cu.division ? ' ' + cu.division : ''} (${_AV_NIVEL_LABEL[cu.nivel] || cu.nivel})`;
+    return `<option value="${cu.id}" ${c?.curso_id === cu.id ? 'selected' : ''}>${nombre}</option>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-t">${isEdit ? 'Editar comunicado' : 'Nuevo comunicado'}</div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">CURSO DESTINATARIO *</label>
+        <select id="av-curso">
+          <option value="">Seleccioná un curso…</option>
+          ${cursosOpts}
+        </select>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">TÍTULO *</label>
+        <input type="text" id="av-titulo" value="${c?.titulo||''}" placeholder="Asunto del comunicado" maxlength="120">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">MENSAJE *</label>
+        <textarea id="av-cuerpo" rows="5" placeholder="Escribí el comunicado para las familias del curso..." style="resize:vertical">${c?.cuerpo||''}</textarea>
+      </div>
+      <div class="acc">
+        <button class="btn-p" id="av-btn-pub" onclick="${isEdit ? `_avisosGuardarComunicadoEdicion('${c.id}')` : '_avisosGuardarComunicado()'}">
+          ${isEdit ? 'Guardar cambios' : 'Enviar comunicado'}
+        </button>
+        <button class="btn-s" onclick="document.getElementById('av-form-wrap').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+
+  document.getElementById('av-titulo')?.focus();
+}
+
+// ── Preview imágenes ──────────────────────────────────
 function _avisosPreview(input) {
   const wrap = document.getElementById('av-preview-wrap');
   if (!wrap) return;
@@ -126,65 +236,297 @@ function _avisosPreview(input) {
   });
 }
 
-// ── Guardar nuevo comunicado ──────────────────────────
+// ── Guardar nueva novedad ─────────────────────────────
 async function _avisosGuardar() {
   const btn    = document.getElementById('av-btn-pub');
   const titulo = document.getElementById('av-titulo')?.value.trim();
-  const cuerpo = document.getElementById('av-cuerpo')?.value.trim();
+  const cuerpo = document.getElementById('av-cuerpo')?.value.trim() || null;
   const nivel  = document.getElementById('av-nivel')?.value || null;
   const files  = Array.from(document.getElementById('av-imagen')?.files || []);
 
-  if (!titulo || !cuerpo) {
-    alert('El título y el mensaje son obligatorios.');
-    return;
-  }
-
-  btn.disabled    = true;
-  btn.textContent = 'Publicando…';
+  if (!titulo) { alert('El título es obligatorio.'); return; }
+  btn.disabled = true; btn.textContent = 'Publicando…';
 
   try {
     const { data: inserted, error } = await sb
       .from('comunicados')
-      .insert({
-        institucion_id: USUARIO_ACTUAL.institucion_id,
-        autor_id:       USUARIO_ACTUAL.id,
-        tipo:           'institucional',
-        nivel:          nivel || null,
-        titulo,
-        cuerpo,
-        requiere_firma: false,
-      })
-      .select('id')
-      .single();
+      .insert({ institucion_id: USUARIO_ACTUAL.institucion_id, autor_id: USUARIO_ACTUAL.id, tipo: 'novedad', nivel, titulo, cuerpo, requiere_firma: false })
+      .select('id').single();
     if (error) throw error;
 
-    // Subir imágenes si las hay
     for (let i = 0; i < files.length; i++) {
       try {
         const blob = await _avisosComprimir(files[i]);
         const path = `${USUARIO_ACTUAL.institucion_id}/${Date.now()}_${i}.jpg`;
-        const { error: storErr } = await sb.storage
-          .from('comunicados')
-          .upload(path, blob, { contentType: 'image/jpeg' });
+        const { error: storErr } = await sb.storage.from('comunicados').upload(path, blob, { contentType: 'image/jpeg' });
         if (storErr) continue;
         const { data: urlData } = sb.storage.from('comunicados').getPublicUrl(path);
-        await sb.from('comunicado_imagenes').insert({
-          comunicado_id: inserted.id,
-          imagen_url:    urlData.publicUrl,
-          orden:         i,
-        });
-      } catch (_) { /* imagen individual falla sin tirar todo */ }
+        await sb.from('comunicado_imagenes').insert({ comunicado_id: inserted.id, imagen_url: urlData.publicUrl, orden: i });
+      } catch (_) {}
     }
 
     await rAvisos();
-
   } catch (e) {
-    alert('No se pudo publicar el comunicado. Intentá de nuevo.');
-    if (btn) { btn.disabled = false; btn.textContent = 'Publicar comunicado'; }
+    alert('No se pudo publicar. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Publicar novedad'; }
   }
 }
 
-// ── Compresión de imagen (Canvas API, sin dependencias) ──
+// ── Guardar nuevo comunicado de curso ─────────────────
+async function _avisosGuardarComunicado() {
+  const btn     = document.getElementById('av-btn-pub');
+  const cursoId = document.getElementById('av-curso')?.value;
+  const titulo  = document.getElementById('av-titulo')?.value.trim();
+  const cuerpo  = document.getElementById('av-cuerpo')?.value.trim();
+
+  if (!cursoId)        { alert('Seleccioná un curso destinatario.'); return; }
+  if (!titulo || !cuerpo) { alert('El título y el mensaje son obligatorios.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Enviando…';
+
+  try {
+    const { error } = await sb
+      .from('comunicados')
+      .insert({ institucion_id: USUARIO_ACTUAL.institucion_id, autor_id: USUARIO_ACTUAL.id, tipo: 'comunicado', curso_id: cursoId, titulo, cuerpo, requiere_firma: false });
+    if (error) throw error;
+    await rAvisos();
+    _avisosTab('comunicados');
+  } catch (e) {
+    alert('No se pudo enviar. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Enviar comunicado'; }
+  }
+}
+
+// ── Editar novedad ────────────────────────────────────
+function _avisosEditarNovedad(id) {
+  const c = _AVISOS_DATA.find(x => x.id === id);
+  if (!c) return;
+  _avisosTab('novedades');
+  _avisosFormNovedad(c);
+  document.getElementById('av-form-wrap')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Editar comunicado ─────────────────────────────────
+function _avisosEditarComunicado(id) {
+  const c = _COM_INT_DATA.find(x => x.id === id);
+  if (!c) return;
+  _avisosTab('comunicados');
+  _avisosFormComunicado(c);
+  document.getElementById('av-form-wrap')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Guardar edición de novedad ────────────────────────
+async function _avisosGuardarEdicion(id) {
+  const btn    = document.getElementById('av-btn-pub');
+  const titulo = document.getElementById('av-titulo')?.value.trim();
+  const cuerpo = document.getElementById('av-cuerpo')?.value.trim() || null;
+  const nivel  = document.getElementById('av-nivel')?.value || null;
+  const files  = Array.from(document.getElementById('av-imagen')?.files || []);
+
+  if (!titulo) { alert('El título es obligatorio.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+  try {
+    const { error } = await sb.from('comunicados').update({ titulo, cuerpo, nivel: nivel || null }).eq('id', id);
+    if (error) throw error;
+
+    const c = _AVISOS_DATA.find(x => x.id === id);
+    const baseOrden = c?.comunicado_imagenes?.length || 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const blob = await _avisosComprimir(files[i]);
+        const path = `${USUARIO_ACTUAL.institucion_id}/${Date.now()}_${i}.jpg`;
+        const { error: storErr } = await sb.storage.from('comunicados').upload(path, blob, { contentType: 'image/jpeg' });
+        if (storErr) continue;
+        const { data: urlData } = sb.storage.from('comunicados').getPublicUrl(path);
+        await sb.from('comunicado_imagenes').insert({ comunicado_id: id, imagen_url: urlData.publicUrl, orden: baseOrden + i });
+      } catch (_) {}
+    }
+
+    await rAvisos();
+  } catch (e) {
+    alert('No se pudo guardar. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+  }
+}
+
+// ── Guardar edición de comunicado ─────────────────────
+async function _avisosGuardarComunicadoEdicion(id) {
+  const btn     = document.getElementById('av-btn-pub');
+  const cursoId = document.getElementById('av-curso')?.value;
+  const titulo  = document.getElementById('av-titulo')?.value.trim();
+  const cuerpo  = document.getElementById('av-cuerpo')?.value.trim();
+
+  if (!cursoId)           { alert('Seleccioná un curso destinatario.'); return; }
+  if (!titulo || !cuerpo) { alert('El título y el mensaje son obligatorios.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+  try {
+    const { error } = await sb.from('comunicados').update({ titulo, cuerpo, curso_id: cursoId }).eq('id', id);
+    if (error) throw error;
+    await rAvisos();
+    _avisosTab('comunicados');
+  } catch (e) {
+    alert('No se pudo guardar. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+  }
+}
+
+// ── Eliminar imagen individual ────────────────────────
+async function _avisosEliminarImagen(imagenId, imagenUrl, comunicadoId) {
+  const { error } = await sb.from('comunicado_imagenes').delete().eq('id', imagenId);
+  if (error) { alert('No se pudo eliminar la imagen.'); return; }
+  const match = imagenUrl.match(/\/comunicados\/(.+)$/);
+  if (match) await sb.storage.from('comunicados').remove([match[1]]).catch(() => {});
+  document.getElementById(`av-img-${imagenId}`)?.remove();
+  const c = _AVISOS_DATA.find(x => x.id === comunicadoId);
+  if (c) c.comunicado_imagenes = c.comunicado_imagenes.filter(i => i.id !== imagenId);
+}
+
+// ── Eliminar novedad completa ─────────────────────────
+async function _avisosEliminar(id) {
+  if (!confirm('¿Eliminar esta novedad? Esta acción no se puede deshacer.')) return;
+  const c = _AVISOS_DATA.find(x => x.id === id);
+  try {
+    const { error } = await sb.from('comunicados').delete().eq('id', id);
+    if (error) throw error;
+    const paths = [];
+    (c?.comunicado_imagenes || []).forEach(img => {
+      const m = img.imagen_url.match(/\/comunicados\/(.+)$/);
+      if (m) paths.push(m[1]);
+    });
+    if (c?.imagen_url) {
+      const m = c.imagen_url.match(/\/comunicados\/(.+)$/);
+      if (m) paths.push(m[1]);
+    }
+    if (paths.length) await sb.storage.from('comunicados').remove(paths).catch(() => {});
+    await rAvisos();
+  } catch (e) {
+    alert('No se pudo eliminar. Intentá de nuevo.');
+  }
+}
+
+// ── Eliminar comunicado completo ──────────────────────
+async function _avisosEliminarComunicado(id) {
+  if (!confirm('¿Eliminar este comunicado? Esta acción no se puede deshacer.')) return;
+  try {
+    const { error } = await sb.from('comunicados').delete().eq('id', id);
+    if (error) throw error;
+    await rAvisos();
+    _avisosTab('comunicados');
+  } catch (e) {
+    alert('No se pudo eliminar. Intentá de nuevo.');
+  }
+}
+
+// ── Lista HTML: novedades ─────────────────────────────
+function _avisosNovListaHtml(lista, perms) {
+  if (!lista.length) return `
+    <div style="text-align:center;padding:60px 20px;color:var(--txt3)">
+      <div style="font-size:36px;margin-bottom:10px">📢</div>
+      <div style="font-size:14px">No hay novedades publicadas aún.</div>
+    </div>`;
+
+  return lista.map(c => {
+    const nivelTxt   = c.nivel ? (_AV_NIVEL_LABEL[c.nivel] || c.nivel) : 'Todos los niveles';
+    const nivelClass = c.nivel ? 'tp' : 'tgr';
+    const fecha      = _avisosFechaLabel(c.created_at);
+    const autor      = c.usuarios?.nombre_completo || '';
+    const imgs       = c.comunicado_imagenes?.length
+      ? c.comunicado_imagenes.map(i => i.imagen_url)
+      : (c.imagen_url ? [c.imagen_url] : []);
+
+    let imgHtml = '';
+    if (imgs.length === 1) {
+      imgHtml = `<img src="${imgs[0]}" alt="" loading="lazy" style="width:100%;max-height:340px;object-fit:contain;display:block;background:var(--bg2,#f5f5f5)">`;
+    } else if (imgs.length > 1) {
+      imgHtml = `
+        <div style="position:relative">
+          <div id="avc-${c.id}" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-ms-overflow-style:none">
+            ${imgs.map(url => `
+              <div style="min-width:100%;scroll-snap-align:start">
+                <img src="${url}" alt="" loading="lazy" style="width:100%;max-height:340px;object-fit:contain;display:block;background:var(--bg2,#f5f5f5)">
+              </div>`).join('')}
+          </div>
+          <button onclick="_avCarGo('${c.id}',-1,event)" style="position:absolute;top:50%;left:8px;transform:translateY(-50%);background:rgba(0,0,0,0.45);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2">‹</button>
+          <button onclick="_avCarGo('${c.id}',1,event)" style="position:absolute;top:50%;right:8px;transform:translateY(-50%);background:rgba(0,0,0,0.45);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2">›</button>
+          <div id="avc-dots-${c.id}" style="position:absolute;bottom:8px;left:0;right:0;display:flex;justify-content:center;gap:5px;pointer-events:none">
+            ${imgs.map((_, i) => `<span style="width:6px;height:6px;border-radius:50%;background:${i===0?'#fff':'rgba(255,255,255,0.45)'}"></span>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px" id="av-card-${c.id}">
+        ${imgHtml}
+        <div style="padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <span class="tag ${nivelClass}">${nivelTxt}</span>
+            <span style="font-size:11px;color:var(--txt3)">${fecha}</span>
+            ${autor ? `<span style="font-size:11px;color:var(--txt3);margin-left:auto">${autor}</span>` : ''}
+          </div>
+          <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:5px;line-height:1.3">${c.titulo}</div>
+          ${c.cuerpo ? `<div style="font-size:12px;color:var(--txt2);line-height:1.5">${c.cuerpo}</div>` : ''}
+        </div>
+        ${perms.crear ? `
+          <div style="padding:10px 16px 12px;border-top:1px solid var(--brd);display:flex;gap:8px">
+            <button class="btn-s" style="font-size:12px" onclick="_avisosEditarNovedad('${c.id}')">✎ Editar</button>
+            <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminar('${c.id}')">✕ Eliminar</button>
+          </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ── Navegación carousel (flechas) ────────────────────
+function _avCarGo(id, dir, ev) {
+  if (ev) ev.stopPropagation();
+  const car = document.getElementById(`avc-${id}`);
+  if (!car) return;
+  car.scrollBy({ left: dir * car.offsetWidth, behavior: 'smooth' });
+  setTimeout(() => {
+    const idx = Math.round(car.scrollLeft / car.offsetWidth);
+    const dotsEl = document.getElementById(`avc-dots-${id}`);
+    if (dotsEl) Array.from(dotsEl.children).forEach((d, i) => {
+      d.style.background = i === idx ? '#fff' : 'rgba(255,255,255,0.45)';
+    });
+  }, 350);
+}
+
+// ── Lista HTML: comunicados ───────────────────────────
+function _avisosComListaHtml(lista, perms) {
+  if (!lista.length) return `
+    <div style="text-align:center;padding:60px 20px;color:var(--txt3)">
+      <div style="font-size:36px;margin-bottom:10px">✉️</div>
+      <div style="font-size:14px">No hay comunicados enviados aún.</div>
+    </div>`;
+
+  return lista.map(c => {
+    const cur      = c.cursos;
+    const cursoTxt = cur ? `${cur.nombre}${cur.division ? ' ' + cur.division : ''}` : '';
+    const nivelTxt = cur ? (_AV_NIVEL_LABEL[cur.nivel] || cur.nivel) : '';
+    const fecha    = _avisosFechaLabel(c.created_at);
+    const autor    = c.usuarios?.nombre_completo || '';
+
+    return `
+      <div class="card" style="padding:14px 16px;margin-bottom:10px" id="av-card-${c.id}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          ${cursoTxt ? `<span class="tag tp">${cursoTxt}</span>` : ''}
+          ${nivelTxt ? `<span class="tag tgr">${nivelTxt}</span>` : ''}
+          <span style="font-size:11px;color:var(--txt3)">${fecha}</span>
+          ${autor ? `<span style="font-size:11px;color:var(--txt3);margin-left:auto">${autor}</span>` : ''}
+        </div>
+        <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:6px;line-height:1.3">${c.titulo}</div>
+        ${c.cuerpo ? `<div style="font-size:12px;color:var(--txt2);line-height:1.55;white-space:pre-line">${c.cuerpo}</div>` : ''}
+        ${perms.crear ? `
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd);display:flex;gap:8px">
+            <button class="btn-s" style="font-size:12px" onclick="_avisosEditarComunicado('${c.id}')">✎ Editar</button>
+            <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminarComunicado('${c.id}')">✕ Eliminar</button>
+          </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ── Compresión de imagen (Canvas, sin dependencias) ───
 async function _avisosComprimir(file, maxPx = 1200, q = 0.78) {
   return new Promise(resolve => {
     const img = new Image();
@@ -207,255 +549,7 @@ async function _avisosComprimir(file, maxPx = 1200, q = 0.78) {
   });
 }
 
-// ── Lista de comunicados publicados ──────────────────
-function _avisosListaHtml(lista, perms = { crear: false }) {
-  if (!lista.length) return `
-    <div style="text-align:center;padding:60px 20px;color:var(--txt3)">
-      <div style="font-size:36px;margin-bottom:10px">📢</div>
-      <div style="font-size:14px">No hay comunicados publicados aún.</div>
-    </div>`;
-
-  const NIVEL_LABEL = { inicial: 'Inicial', primario: 'Primario', secundario: 'Secundario' };
-
-  return lista.map(c => {
-    const nivelTxt   = c.nivel ? (NIVEL_LABEL[c.nivel] || c.nivel) : 'Todos los niveles';
-    const nivelClass = c.nivel ? 'tp' : 'tgr';
-    const fecha      = _avisosFechaLabel(c.created_at);
-    const autor      = c.usuarios?.nombre_completo || '';
-    const excerpt    = c.cuerpo?.length > 140
-      ? c.cuerpo.slice(0, 140).trimEnd() + '…'
-      : (c.cuerpo || '');
-
-    // Imágenes: nueva tabla primero, fallback a imagen_url
-    const imgs = c.comunicado_imagenes?.length
-      ? c.comunicado_imagenes
-      : (c.imagen_url ? [{ id: null, imagen_url: c.imagen_url }] : []);
-    const thumbUrl = imgs[0]?.imagen_url || null;
-
-    return `
-      <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px" id="av-card-${c.id}">
-        ${thumbUrl
-          ? `<img src="${thumbUrl}" alt="" loading="lazy"
-               style="width:100%;height:180px;object-fit:cover;display:block">`
-          : ''}
-        <div style="padding:14px 16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-            <span class="tag ${nivelClass}">${nivelTxt}</span>
-            <span style="font-size:11px;color:var(--txt3)">${fecha}</span>
-            ${autor ? `<span style="font-size:11px;color:var(--txt3);margin-left:auto">${autor}</span>` : ''}
-            ${imgs.length > 1 ? `<span style="font-size:11px;color:var(--txt3)">📷 ${imgs.length}</span>` : ''}
-          </div>
-          <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:5px;line-height:1.3">${c.titulo}</div>
-          <div style="font-size:12px;color:var(--txt2);line-height:1.5">${excerpt}</div>
-        </div>
-        ${perms.crear ? `
-          <div style="padding:10px 16px 12px;border-top:1px solid var(--brd);display:flex;gap:8px">
-            <button class="btn-s" style="font-size:12px" onclick="_avisosEditar('${c.id}')">✎ Editar</button>
-            <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminar('${c.id}')">✕ Eliminar</button>
-          </div>
-          <div id="av-edit-${c.id}"></div>
-        ` : ''}
-      </div>`;
-  }).join('');
-}
-
-// ── Editar comunicado ────────────────────────────────
-function _avisosEditar(id) {
-  const wrap = document.getElementById(`av-edit-${id}`);
-  if (!wrap) return;
-  if (wrap.innerHTML) { wrap.innerHTML = ''; return; }
-
-  const c = _AVISOS_DATA.find(x => x.id === id);
-  if (!c) return;
-
-  // Imágenes actuales (nueva tabla + fallback legacy)
-  const imgs = c.comunicado_imagenes?.length
-    ? c.comunicado_imagenes
-    : (c.imagen_url ? [{ id: null, imagen_url: c.imagen_url }] : []);
-
-  const imgsHtml = imgs.length ? `
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">IMÁGENES ACTUALES</label>
-      <div id="av-e-imgs-list-${id}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        ${imgs.map(img => img.id ? `
-          <div id="av-img-${img.id}" style="position:relative">
-            <img src="${img.imagen_url}" alt=""
-              style="width:80px;height:80px;object-fit:cover;border-radius:var(--rad);display:block">
-            <button onclick="_avisosEliminarImagen('${img.id}','${img.imagen_url}','${id}')"
-              style="position:absolute;top:2px;right:2px;background:#d63b2f;border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>
-          </div>` : `
-          <img src="${img.imagen_url}" alt=""
-            style="width:80px;height:80px;object-fit:cover;border-radius:var(--rad)">
-        `).join('')}
-      </div>
-      <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">AGREGAR MÁS IMÁGENES</label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="file" id="av-e-imgs-nuevas-${id}" accept="image/*" multiple style="font-size:12px;flex:1;padding:0">
-        <button class="btn-s" id="av-e-btn-imgs-${id}" style="font-size:12px;white-space:nowrap"
-          onclick="_avisosAgregarImagenes('${id}')">Agregar</button>
-      </div>
-    </div>` : `
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">IMÁGENES</label>
-      <div id="av-e-imgs-list-${id}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="file" id="av-e-imgs-nuevas-${id}" accept="image/*" multiple style="font-size:12px;flex:1;padding:0">
-        <button class="btn-s" id="av-e-btn-imgs-${id}" style="font-size:12px;white-space:nowrap"
-          onclick="_avisosAgregarImagenes('${id}')">Agregar</button>
-      </div>
-    </div>`;
-
-  wrap.innerHTML = `
-    <div style="padding:0 16px 16px;border-top:1px solid var(--brd)">
-      <div style="padding-top:12px;margin-bottom:10px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">NIVEL DESTINATARIO</label>
-        <select id="av-e-nivel-${id}">
-          <option value="">Todos los niveles de la institución</option>
-          <option value="inicial">Solo Inicial</option>
-          <option value="primario">Solo Primario</option>
-          <option value="secundario">Solo Secundario</option>
-        </select>
-      </div>
-      <div style="margin-bottom:10px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">TÍTULO *</label>
-        <input type="text" id="av-e-titulo-${id}" maxlength="120">
-      </div>
-      <div style="margin-bottom:14px">
-        <label style="font-size:11px;font-weight:600;color:var(--txt2);display:block;margin-bottom:5px;letter-spacing:.05em">MENSAJE *</label>
-        <textarea id="av-e-cuerpo-${id}" rows="4" style="resize:vertical"></textarea>
-      </div>
-      ${imgsHtml}
-      <div class="acc">
-        <button class="btn-p" id="av-e-btn-${id}" onclick="_avisosGuardarEdicion('${id}')">Guardar cambios</button>
-        <button class="btn-s" onclick="document.getElementById('av-edit-${id}').innerHTML=''">Cancelar</button>
-      </div>
-    </div>`;
-
-  const nivelSel = document.getElementById(`av-e-nivel-${id}`);
-  const tituloIn = document.getElementById(`av-e-titulo-${id}`);
-  const cuerpoIn = document.getElementById(`av-e-cuerpo-${id}`);
-  if (nivelSel) nivelSel.value = c.nivel || '';
-  if (tituloIn) { tituloIn.value = c.titulo; tituloIn.focus(); }
-  if (cuerpoIn) cuerpoIn.value = c.cuerpo || '';
-}
-
-async function _avisosGuardarEdicion(id) {
-  const titulo = document.getElementById(`av-e-titulo-${id}`)?.value.trim();
-  const cuerpo = document.getElementById(`av-e-cuerpo-${id}`)?.value.trim();
-  const nivel  = document.getElementById(`av-e-nivel-${id}`)?.value || null;
-  const btn    = document.getElementById(`av-e-btn-${id}`);
-
-  if (!titulo || !cuerpo) { alert('El título y el mensaje son obligatorios.'); return; }
-
-  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
-
-  try {
-    const { error } = await sb
-      .from('comunicados')
-      .update({ titulo, cuerpo, nivel: nivel || null })
-      .eq('id', id);
-    if (error) throw error;
-    await rAvisos();
-  } catch (e) {
-    alert('No se pudo guardar. Intentá de nuevo.');
-    if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
-  }
-}
-
-// ── Agregar imágenes desde el form de edición ────────
-async function _avisosAgregarImagenes(comunicadoId) {
-  const input = document.getElementById(`av-e-imgs-nuevas-${comunicadoId}`);
-  const btn   = document.getElementById(`av-e-btn-imgs-${comunicadoId}`);
-  if (!input?.files?.length) return;
-
-  if (btn) { btn.disabled = true; btn.textContent = 'Subiendo…'; }
-
-  const c        = _AVISOS_DATA.find(x => x.id === comunicadoId);
-  const baseOrden = c?.comunicado_imagenes?.length || 0;
-  const container = document.getElementById(`av-e-imgs-list-${comunicadoId}`);
-
-  for (let i = 0; i < input.files.length; i++) {
-    try {
-      const blob = await _avisosComprimir(input.files[i]);
-      const path = `${USUARIO_ACTUAL.institucion_id}/${Date.now()}_${i}.jpg`;
-      const { error: storErr } = await sb.storage
-        .from('comunicados')
-        .upload(path, blob, { contentType: 'image/jpeg' });
-      if (storErr) continue;
-      const { data: urlData } = sb.storage.from('comunicados').getPublicUrl(path);
-      const imagenUrl = urlData.publicUrl;
-
-      const { data: ins } = await sb
-        .from('comunicado_imagenes')
-        .insert({ comunicado_id: comunicadoId, imagen_url: imagenUrl, orden: baseOrden + i })
-        .select('id')
-        .single();
-
-      if (ins && c) {
-        c.comunicado_imagenes = c.comunicado_imagenes || [];
-        c.comunicado_imagenes.push({ id: ins.id, imagen_url: imagenUrl, orden: baseOrden + i });
-      }
-
-      if (container && ins) {
-        const div = document.createElement('div');
-        div.id = `av-img-${ins.id}`;
-        div.style.position = 'relative';
-        div.innerHTML = `
-          <img src="${imagenUrl}" alt=""
-            style="width:80px;height:80px;object-fit:cover;border-radius:var(--rad);display:block">
-          <button onclick="_avisosEliminarImagen('${ins.id}','${imagenUrl}','${comunicadoId}')"
-            style="position:absolute;top:2px;right:2px;background:#d63b2f;border:none;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>`;
-        container.appendChild(div);
-      }
-    } catch (_) { /* imagen individual falla sin tirar todo */ }
-  }
-
-  input.value = '';
-  if (btn) { btn.disabled = false; btn.textContent = 'Agregar'; }
-}
-
-// ── Eliminar una imagen individual (desde edición) ───
-async function _avisosEliminarImagen(imagenId, imagenUrl, comunicadoId) {
-  const { error } = await sb.from('comunicado_imagenes').delete().eq('id', imagenId);
-  if (error) { alert('No se pudo eliminar la imagen.'); return; }
-
-  const match = imagenUrl.match(/\/comunicados\/(.+)$/);
-  if (match) await sb.storage.from('comunicados').remove([match[1]]).catch(() => {});
-
-  document.getElementById(`av-img-${imagenId}`)?.remove();
-
-  const c = _AVISOS_DATA.find(x => x.id === comunicadoId);
-  if (c) c.comunicado_imagenes = c.comunicado_imagenes.filter(i => i.id !== imagenId);
-}
-
-// ── Eliminar comunicado completo ─────────────────────
-async function _avisosEliminar(id) {
-  if (!confirm('¿Eliminar este comunicado? Esta acción no se puede deshacer.')) return;
-
-  const c = _AVISOS_DATA.find(x => x.id === id);
-
-  try {
-    const { error } = await sb.from('comunicados').delete().eq('id', id);
-    if (error) throw error;
-
-    // Eliminar imágenes de Storage (la tabla se borra por CASCADE)
-    const paths = [];
-    (c?.comunicado_imagenes || []).forEach(img => {
-      const m = img.imagen_url.match(/\/comunicados\/(.+)$/);
-      if (m) paths.push(m[1]);
-    });
-    if (c?.imagen_url) {
-      const m = c.imagen_url.match(/\/comunicados\/(.+)$/);
-      if (m) paths.push(m[1]);
-    }
-    if (paths.length) await sb.storage.from('comunicados').remove(paths).catch(() => {});
-
-    await rAvisos();
-  } catch (e) {
-    alert('No se pudo eliminar. Intentá de nuevo.');
-  }
-}
-
+// ── Fecha label ───────────────────────────────────────
 function _avisosFechaLabel(isoStr) {
   if (!isoStr) return '';
   const diff = Math.floor((Date.now() - new Date(isoStr)) / 86400000);
