@@ -811,3 +811,17 @@ body.dark .com-thumb { background: rgba(255,255,255,0.06); }
   display: flex; align-items: center; line-height: 1; transition: color 0.12s;
 }
 .btn-pass-toggle:hover { color: var(--color-dark); }
+
+/* ── Mobile: colapso de sidebar no aplica en drawer ───────────────── */
+@media (max-width: 767px) {
+  .sidebar-collapse-btn                           { display: none; }
+  body.sidebar-collapsed .sidebar-brand-text      { display: flex; }
+  body.sidebar-collapsed .sidebar-nav-label       { display: block; }
+  body.sidebar-collapsed .sidebar-nav-item        { justify-content: flex-start; padding: 9px 10px; gap: 10px; }
+  body.sidebar-collapsed .sidebar-footer-label    { display: block; }
+  body.sidebar-collapsed .dark-toggle-sw          { display: block; }
+  body.sidebar-collapsed .sidebar-footer-item     { justify-content: flex-start; padding: 9px 10px; gap: 10px; }
+  body.sidebar-collapsed .sidebar-student-info    { display: block; }
+  body.sidebar-collapsed .sidebar-student-chevron { display: flex; }
+  body.sidebar-collapsed .sidebar-student-btn     { justify-content: flex-start; }
+}

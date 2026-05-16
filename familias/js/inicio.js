@@ -188,10 +188,13 @@ function _alumnoCard() {
 function _asistResumen(pct, ausentes, tardanzas, total, inicioMes) {
   const color = pct === null ? '' : pct >= 85 ? 'success' : pct >= 75 ? 'warning' : 'danger';
   return `
-    <div class="card">
+    <div class="card" onclick="goPage('asistencia')" style="cursor:pointer">
       <div class="card-header">
-        <span class="card-label">ASISTENCIA</span>
-        <span class="card-sublabel">${fmtMes(inicioMes)}</span>
+        <div>
+          <span class="card-label">ASISTENCIA</span>
+          <span class="card-sublabel" style="margin-left:6px">${fmtMes(inicioMes)}</span>
+        </div>
+        <button class="card-link">Ver detalle →</button>
       </div>
       ${total === 0
         ? `<p class="empty-msg">Sin registros este mes.</p>`
