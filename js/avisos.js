@@ -77,7 +77,7 @@ async function rAvisos() {
     el.innerHTML = `
       <div style="max-width:860px;margin:0 auto;padding:20px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px">
-          <h2 style="font-size:18px;font-weight:700;color:var(--txt)">Comunicación interna</h2>
+          <h2 style="font-size:18px;font-weight:700;color:var(--txt)">Portal familiar</h2>
           ${perms.crear ? `<button class="btn-p" id="av-btn-nuevo" onclick="_avisosAbrirForm()">+ Nuevo</button>` : ''}
         </div>
 
@@ -678,9 +678,16 @@ async function _avisosEliminar(id) {
 
 // ── Eliminar comunicado completo ──────────────────────
 async function _avisosEliminarComunicado(id) {
-  if (!confirm('¿Eliminar este comunicado? Esta acción no se puede deshacer.')) return;
+  return _avisosEliminarComunicadoGrupo([id]);
+}
+
+async function _avisosEliminarComunicadoGrupo(ids) {
+  const msg = ids.length > 1
+    ? `¿Eliminar este comunicado (enviado a ${ids.length} cursos)? Esta acción no se puede deshacer.`
+    : '¿Eliminar este comunicado? Esta acción no se puede deshacer.';
+  if (!confirm(msg)) return;
   try {
-    const { error } = await sb.from('comunicados').delete().eq('id', id);
+    const { error } = await sb.from('comunicados').delete().in('id', ids);
     if (error) throw error;
     await rAvisos();
     _avisosTab('comunicados');
@@ -770,32 +777,57 @@ function _avisosComListaHtml(lista, perms) {
       <div style="font-size:14px">No hay comunicados enviados aún.</div>
     </div>`;
 
-  return lista.map(c => {
-    const cur      = c.cursos;
-    const cursoTxt = cur ? `${cur.nombre}${cur.division ? ' ' + cur.division : ''}` : '';
-    const nivelTxt = cur ? (_AV_NIVEL_LABEL[cur.nivel] || cur.nivel) : '';
-    const fecha    = _avisosFechaLabel(c.created_at);
-    const autor    = c.usuarios?.nombre_completo || '';
+  // Agrupar por mismo envío: mismo título + cuerpo + timestamp (los inserts batch comparten created_at exacto)
+  const groups = [];
+  const seen   = {};
+  lista.forEach(c => {
+    const key = `${c.titulo}||${c.cuerpo || ''}||${c.created_at}`;
+    if (!seen[key]) {
+      seen[key] = { key, items: [] };
+      groups.push(seen[key]);
+    }
+    seen[key].items.push(c);
+  });
 
-    const vistos = _COM_INT_VISTOS[c.id] || 0;
+  return groups.map(group => {
+    const rep    = group.items[0];
+    const fecha  = _avisosFechaLabel(rep.created_at);
+    const autor  = rep.usuarios?.nombre_completo || '';
+    const isSingle = group.items.length === 1;
+
+    // Badge de nivel (del primer ítem; todos son del mismo nivel en un envío normal)
+    const nivelTxt = rep.cursos ? (_AV_NIVEL_LABEL[rep.cursos.nivel] || rep.cursos.nivel) : '';
+
+    // Badges de todos los cursos del grupo
+    const cursosHtml = group.items
+      .filter(c => c.cursos)
+      .map(c => {
+        const cur = c.cursos;
+        return `<span class="tag tp">${cur.nombre}${cur.division ? ' ' + cur.division : ''}</span>`;
+      }).join('');
+
+    // Sumar vistos de todos los rows del grupo
+    const vistos    = group.items.reduce((sum, c) => sum + (_COM_INT_VISTOS[c.id] || 0), 0);
     const vistosTxt = vistos === 0 ? 'Sin confirmaciones' : `${vistos} visto${vistos !== 1 ? 's' : ''}`;
 
+    const allIds = group.items.map(c => `'${c.id}'`).join(',');
+
     return `
-      <div class="card" style="padding:14px 16px;margin-bottom:10px" id="av-card-${c.id}">
+      <div class="card" style="padding:14px 16px;margin-bottom:10px" id="av-card-${rep.id}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-          ${cursoTxt ? `<span class="tag tp">${cursoTxt}</span>` : ''}
           ${nivelTxt ? `<span class="tag tgr">${nivelTxt}</span>` : ''}
+          ${cursosHtml}
           <span style="font-size:11px;color:var(--txt3)">${fecha}</span>
           ${autor ? `<span style="font-size:11px;color:var(--txt3);margin-left:auto">${autor}</span>` : ''}
         </div>
-        <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:6px;line-height:1.3">${c.titulo}</div>
-        ${c.cuerpo ? `<div style="font-size:12px;color:var(--txt2);line-height:1.55;white-space:pre-line">${c.cuerpo}</div>` : ''}
+        <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:6px;line-height:1.3">${rep.titulo}</div>
+        ${rep.cuerpo ? `<div style="font-size:12px;color:var(--txt2);line-height:1.55;white-space:pre-line">${rep.cuerpo}</div>` : ''}
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--brd);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:11px;color:${vistos > 0 ? 'var(--green)' : 'var(--txt3)'}">👁 ${vistosTxt}</span>
           ${perms.crear ? `
             <span style="margin-left:auto;display:flex;gap:8px">
-              <button class="btn-s" style="font-size:12px" onclick="_avisosEditarComunicado('${c.id}')">✎ Editar</button>
-              <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminarComunicado('${c.id}')">✕ Eliminar</button>
+              ${isSingle ? `<button class="btn-s" style="font-size:12px" onclick="_avisosEditarComunicado('${rep.id}')">✎ Editar</button>` : ''}
+              <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminarComunicadoGrupo([${allIds}])">✕ Eliminar</button>
             </span>` : ''}
         </div>
       </div>`;
