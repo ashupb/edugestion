@@ -5,6 +5,7 @@
 let _AVISOS_DATA    = [];   // novedades
 let _COM_INT_DATA   = [];   // comunicados por curso
 let _COM_INT_CURSOS = [];   // cursos disponibles para selector
+let _COM_INT_VISTOS = {};   // { comunicado_id: count } de lecturas confirmadas
 let _AVISOS_TAB     = 'novedades';
 let _AVISOS_FILTRO_NOV = '';  // '' = todos, 'inicial', 'primario', 'secundario'
 let _AVISOS_FILTRO_COM = '';  // '' = todos, 'inicial', 'primario', 'secundario'
@@ -59,6 +60,19 @@ async function rAvisos() {
     _COM_INT_DATA   = comRes.data || [];
     _COM_INT_CURSOS = curRes.data || [];
     _AVISOS_TAB     = 'novedades';
+
+    // Conteo de vistos (lecturas confirmadas) por comunicado
+    _COM_INT_VISTOS = {};
+    const comIds = _COM_INT_DATA.map(c => c.id);
+    if (comIds.length) {
+      const { data: lecturasData } = await sb
+        .from('comunicado_lecturas')
+        .select('comunicado_id')
+        .in('comunicado_id', comIds);
+      (lecturasData || []).forEach(l => {
+        _COM_INT_VISTOS[l.comunicado_id] = (_COM_INT_VISTOS[l.comunicado_id] || 0) + 1;
+      });
+    }
 
     el.innerHTML = `
       <div style="max-width:860px;margin:0 auto;padding:20px">
@@ -763,6 +777,9 @@ function _avisosComListaHtml(lista, perms) {
     const fecha    = _avisosFechaLabel(c.created_at);
     const autor    = c.usuarios?.nombre_completo || '';
 
+    const vistos = _COM_INT_VISTOS[c.id] || 0;
+    const vistosTxt = vistos === 0 ? 'Sin confirmaciones' : `${vistos} visto${vistos !== 1 ? 's' : ''}`;
+
     return `
       <div class="card" style="padding:14px 16px;margin-bottom:10px" id="av-card-${c.id}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
@@ -773,11 +790,14 @@ function _avisosComListaHtml(lista, perms) {
         </div>
         <div style="font-size:14px;font-weight:700;color:var(--txt);margin-bottom:6px;line-height:1.3">${c.titulo}</div>
         ${c.cuerpo ? `<div style="font-size:12px;color:var(--txt2);line-height:1.55;white-space:pre-line">${c.cuerpo}</div>` : ''}
-        ${perms.crear ? `
-          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd);display:flex;gap:8px">
-            <button class="btn-s" style="font-size:12px" onclick="_avisosEditarComunicado('${c.id}')">✎ Editar</button>
-            <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminarComunicado('${c.id}')">✕ Eliminar</button>
-          </div>` : ''}
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--brd);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:${vistos > 0 ? 'var(--green)' : 'var(--txt3)'}">👁 ${vistosTxt}</span>
+          ${perms.crear ? `
+            <span style="margin-left:auto;display:flex;gap:8px">
+              <button class="btn-s" style="font-size:12px" onclick="_avisosEditarComunicado('${c.id}')">✎ Editar</button>
+              <button class="btn-s" style="font-size:12px;color:#d63b2f;border-color:#d63b2f" onclick="_avisosEliminarComunicado('${c.id}')">✕ Eliminar</button>
+            </span>` : ''}
+        </div>
       </div>`;
   }).join('');
 }

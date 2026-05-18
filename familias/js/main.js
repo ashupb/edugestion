@@ -1,6 +1,7 @@
 // ── Estado de navegación ──────────────────────────────────────────
 let CUR_PAGE = 'login';
 let UNREAD_COUNT = 0;
+let _DEEP_LINK_ID = null; // ID del ítem a destacar tras la próxima navegación
 
 // ── Ítems del nav ─────────────────────────────────────────────────
 const NAV_ITEMS = [
@@ -54,6 +55,12 @@ function goPage(id) {
     closeSidebarDrawer();
     if (PAGE_RENDERERS[id]) PAGE_RENDERERS[id]();
   }
+}
+
+// Navega a una página y abre/resalta el ítem con ese ID una vez cargado
+function goPageDeep(pageId, itemId) {
+  _DEEP_LINK_ID = itemId;
+  goPage(pageId);
 }
 
 // ── Render sidebar completo ───────────────────────────────────────

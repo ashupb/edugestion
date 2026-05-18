@@ -275,7 +275,7 @@ function _feedItemNovedad(c, leidosIds) {
   }
 
   return `
-    <div class="feed-item" onclick="goPage('novedades')">
+    <div class="feed-item" onclick="goPageDeep('novedades', '${c.id}')">
       ${imgHtml}
       <div class="feed-meta">
         <span class="badge badge-success">NOVEDAD</span>
@@ -295,7 +295,7 @@ function _feedItemComunicado(c, leidosIds) {
     : '';
 
   return `
-    <div class="feed-item" onclick="goPage('comunicados')">
+    <div class="feed-item" onclick="goPageDeep('comunicados', '${c.id}')">
       <div class="feed-meta">
         <span class="badge badge-com">COMUNICADO</span>
         <span class="feed-date">${fechaRelativa(c.created_at)}</span>

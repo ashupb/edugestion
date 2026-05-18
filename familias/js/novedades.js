@@ -11,9 +11,9 @@ async function rNovedades() {
 
   try {
     const nivelAlumno = ALUMNO_ACTUAL?.cursos?.nivel;
-    const nivelFilter = nivelAlumno
-      ? `nivel.is.null,nivel.eq.${nivelAlumno}`
-      : 'nivel.is.null';
+    const cursoId     = ALUMNO_ACTUAL?.cursos?.id;
+    const nivelFilter = nivelAlumno ? `nivel.is.null,nivel.eq.${nivelAlumno}` : 'nivel.is.null';
+    const cursoFilter = cursoId ? `curso_id.is.null,curso_id.eq.${cursoId}` : 'curso_id.is.null';
 
     let data, error;
     ({ data, error } = await sb
@@ -22,6 +22,7 @@ async function rNovedades() {
       .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
       .eq('tipo', 'novedad')
       .or(nivelFilter)
+      .or(cursoFilter)
       .order('created_at', { ascending: false })
       .limit(30));
 
@@ -32,17 +33,7 @@ async function rNovedades() {
         .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
         .eq('tipo', 'novedad')
         .or(nivelFilter)
-        .order('created_at', { ascending: false })
-        .limit(30));
-    }
-
-    // Fallback final: sin filtro de nivel
-    if (error) {
-      ({ data, error } = await sb
-        .from('comunicados')
-        .select('id, titulo, cuerpo, imagen_url, nivel, created_at, usuarios(nombre_completo)')
-        .eq('institucion_id', USUARIO_FAMILIAR.institucion_id)
-        .eq('tipo', 'novedad')
+        .or(cursoFilter)
         .order('created_at', { ascending: false })
         .limit(30));
     }
@@ -55,7 +46,7 @@ async function rNovedades() {
     }));
     _NOV_DATA = novedades;
 
-    // Lecturas previas (solo para el dot visual, novedades no afectan la campana)
+    // Lecturas previas (dot visual; novedades no afectan la campana)
     let leidosIds = new Set();
     if (novedades.length) {
       const { data: lecturas } = await sb
@@ -80,7 +71,7 @@ async function rNovedades() {
 
     _novInitThumbCarousels(novedades);
 
-    // Marcar no leídas como leídas (no dispara campana — novedades no tienen badge)
+    // Marcar no leídas como leídas (sin campana)
     const noLeidas = novedades.filter(c => !leidosIds.has(c.id));
     if (noLeidas.length) {
       await sb.from('comunicado_lecturas').upsert(
@@ -88,6 +79,11 @@ async function rNovedades() {
         { onConflict: 'comunicado_id,usuario_id' }
       );
     }
+
+    // Deep link: abrir detalle del ítem específico si viene de inicio
+    const targetId = _DEEP_LINK_ID;
+    _DEEP_LINK_ID = null;
+    if (targetId) setTimeout(() => _novVerDetalle(targetId), 50);
 
   } catch (e) {
     el.innerHTML = `

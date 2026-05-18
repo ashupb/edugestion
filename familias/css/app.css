@@ -737,6 +737,32 @@ body.dark .badge-com { background: rgba(59,130,246,0.2); color: #60a5fa; }
 }
 body.dark .badge-nov { background: rgba(34,153,87,0.2); color: #4ade80; }
 
+/* ── Botón Visto ────────────────────────────────────────────────── */
+.btn-visto {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--color-green); color: var(--color-green);
+  background: transparent; cursor: pointer; transition: opacity 0.15s;
+}
+.btn-visto:active { opacity: 0.7; }
+.btn-visto.visto {
+  background: rgba(34,153,87,0.1); border-color: transparent; cursor: default;
+}
+body.dark .btn-visto { border-color: #4ade80; color: #4ade80; }
+body.dark .btn-visto.visto { background: rgba(74,222,128,0.1); }
+
+/* Resaltado temporal al hacer deep link ─────────────────────────── */
+.com-card--highlight {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+  animation: com-hl-fade 2s forwards;
+}
+@keyframes com-hl-fade {
+  0%   { outline-color: var(--color-green); }
+  80%  { outline-color: var(--color-green); }
+  100% { outline-color: transparent; }
+}
+
 /* ── Comunicado texto (sin imagen, en familias) ─────────────────── */
 .com-text-card { padding: 14px 16px; margin-bottom: 10px; }
 .com-text-card .com-titulo { margin-bottom: 6px; }
