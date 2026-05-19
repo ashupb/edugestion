@@ -438,6 +438,30 @@ async function verEvento(id) {
       const estadoFam = respFam?.respuesta || 'pendiente';
       const msgFam    = respFam?.mensaje || '';
       const estadoLabel = { pendiente: '⏳ Sin respuesta', acepta: '✅ Aceptó', rechaza: '❌ Rechazó', cancela: '⚠ Canceló / Solicita reprogramar', propone: '↩ Propone otro horario' }[estadoFam] || estadoFam;
+
+      let accionesStaffHtml = '';
+      if (estadoFam === 'propone' && respFam) {
+        accionesStaffHtml = `
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="_agAceptarPropuesta('${e.id}','${respFam.usuario_id}')"
+              style="padding:8px 14px;border-radius:8px;border:none;background:var(--verde,#229957);color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
+              ✓ Aceptar esta propuesta
+            </button>
+            <button onclick="editarEvento('${e.id}')"
+              style="padding:8px 14px;border-radius:8px;border:1.5px solid var(--txt3,#aaa);background:transparent;color:var(--txt2);font-size:12px;cursor:pointer;font-family:inherit">
+              ✏️ Proponer otro horario
+            </button>
+          </div>`;
+      } else if ((estadoFam === 'cancela' || estadoFam === 'rechaza') && puedeEditar) {
+        accionesStaffHtml = `
+          <div style="margin-top:10px">
+            <button onclick="editarEvento('${e.id}')"
+              style="padding:8px 14px;border-radius:8px;border:1.5px solid var(--txt3,#aaa);background:transparent;color:var(--txt2);font-size:12px;cursor:pointer;font-family:inherit">
+              ✏️ Proponer nuevo horario
+            </button>
+          </div>`;
+      }
+
       rsvpHtml = `
         <div style="margin-top:10px;padding:10px;background:var(--surf2);border-radius:var(--rad);border-top:1px solid var(--brd)">
           <div class="sec-lb" style="margin:0 0 6px">Alumno/a convocado/a</div>
@@ -446,6 +470,7 @@ async function verEvento(id) {
             <div class="sec-lb" style="margin:0 0 4px">Respuesta de la familia</div>
             <span style="font-size:12px">${estadoLabel}</span>
             ${msgFam ? `<div style="margin-top:4px;font-size:11px;color:var(--txt2);font-style:italic">"${msgFam}"</div>` : ''}
+            ${accionesStaffHtml}
           </div>
         </div>`;
     } else if ((e.convocatoria_grupos||[]).includes('familias')) {
@@ -549,6 +574,41 @@ async function editarEvento(id) {
   if (!e) return;
   document.getElementById('detalle-evento').innerHTML = '';
   abrirFormEvento(e);
+}
+
+async function _agAceptarPropuesta(eventoId, familiaUserId) {
+  const btn = event?.currentTarget || event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  try {
+    const { error } = await sb
+      .from('evento_respuestas')
+      .update({ respuesta: 'acepta' })
+      .eq('evento_id', eventoId)
+      .eq('usuario_id', familiaUserId);
+    if (error) throw error;
+
+    const { data: ev } = await sb
+      .from('eventos_institucionales')
+      .select('nombre')
+      .eq('id', eventoId)
+      .single();
+
+    await sb.from('notificaciones').insert({
+      usuario_id:       familiaUserId,
+      tipo:             'rsvp_cita',
+      titulo:           'Cita confirmada',
+      descripcion:      `Se confirmó la cita "${ev?.nombre || ''}" con el horario que propusiste.`,
+      referencia_id:    eventoId,
+      referencia_tabla: 'eventos_institucionales',
+    });
+
+    _agendaEventoAbierto = null;
+    await verEvento(eventoId);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Aceptar esta propuesta'; }
+    alert('No se pudo confirmar. ' + (err?.message || JSON.stringify(err)));
+  }
 }
 
 // ─── FORMULARIO ───────────────────────────────────────
