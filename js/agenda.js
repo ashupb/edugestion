@@ -605,6 +605,21 @@ async function _agAceptarPropuesta(eventoId, familiaUserId) {
 
     _agendaEventoAbierto = null;
     await verEvento(eventoId);
+
+    // Banner recordatorio para actualizar fecha/hora
+    const card = document.getElementById('detalle-evento')?.querySelector('.card');
+    if (card) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'margin-bottom:12px;padding:10px 12px;background:#e8f5ee;border:1px solid #1a7a4a40;border-radius:8px;font-size:12px;color:#1a7a4a';
+      banner.innerHTML = `<strong>✅ Propuesta aceptada.</strong> La familia fue notificada. Actualizá la fecha y hora del evento para que figure el nuevo horario acordado.
+        <div style="margin-top:8px">
+          <button onclick="editarEvento('${eventoId}')"
+            style="padding:6px 12px;border-radius:6px;border:1px solid #1a7a4a;background:transparent;color:#1a7a4a;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">
+            ✏️ Actualizar fecha/hora ahora
+          </button>
+        </div>`;
+      card.prepend(banner);
+    }
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = '✓ Aceptar esta propuesta'; }
     alert('No se pudo confirmar. ' + (err?.message || JSON.stringify(err)));
