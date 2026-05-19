@@ -434,7 +434,7 @@ async function verEvento(id) {
       const alumnoNom = e.alumnos ? `${e.alumnos.apellido || ''}, ${e.alumnos.nombre || ''}`.replace(/^,\s*/, '') : '—';
       const curso     = e.alumnos?.cursos;
       const cursoTxt  = curso ? `${curso.nombre}${curso.division?' '+curso.division:''}` : '';
-      const respFam   = rsvpArr.find(r => !Object.values(USUARIOS_INST).find(u => u.id === r.usuario_id));
+      const respFam   = rsvpArr.find(r => USUARIOS_INST.find(u => u.id === r.usuario_id && u.rol === 'familia'));
       const estadoFam = respFam?.respuesta || 'pendiente';
       const msgFam    = respFam?.mensaje || '';
       const estadoLabel = { pendiente: '⏳ Sin respuesta', acepta: '✅ Aceptó', rechaza: '❌ Rechazó', cancela: '⚠ Canceló / Solicita reprogramar', propone: '↩ Propone otro horario' }[estadoFam] || estadoFam;
