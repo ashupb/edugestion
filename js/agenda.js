@@ -666,7 +666,7 @@ function abrirFormEvento(eventoExistente = null) {
 
           <div id="ev-cita-alumno-wrap">
             <div class="sec-lb">Alumno/a *</div>
-            <select id="ev-cita-alumno" class="sel-estilizado">
+            <select id="ev-cita-alumno" class="sel-estilizado" onchange="_agCargarProbsAlumno(this.value)">
               <option value="">— Seleccioná primero un curso —</option>
             </select>
           </div>
@@ -798,29 +798,30 @@ function _agGetCursosFamilias() {
 
 async function _agCitaCursoChange(cursoId, preselAlumnoId = null) {
   const alumnoSel = document.getElementById('ev-cita-alumno');
-  const probSel   = document.getElementById('ev-cita-prob');
   if (!alumnoSel) return;
   if (!cursoId) {
     alumnoSel.innerHTML = '<option value="">— Seleccioná primero un curso —</option>';
+    document.getElementById('ev-cita-prob').innerHTML = '<option value="">— Sin asociar —</option>';
     return;
   }
   alumnoSel.innerHTML = '<option value="">Cargando...</option>';
-  const { data: alumnos } = await sb
+  const { data: alumnos, error } = await sb
     .from('alumnos').select('id, nombre_completo')
-    .eq('curso_id', cursoId).eq('activo', true).order('nombre_completo');
+    .eq('curso_id', cursoId).neq('activo', false).order('nombre_completo');
+  if (error) {
+    alumnoSel.innerHTML = '<option value="">Error al cargar alumnos</option>';
+    return;
+  }
+  if (!alumnos || !alumnos.length) {
+    alumnoSel.innerHTML = '<option value="">No hay alumnos en este curso</option>';
+    return;
+  }
   alumnoSel.innerHTML = '<option value="">— Seleccioná alumno/a —</option>' +
-    (alumnos||[]).map(a =>
+    alumnos.map(a =>
       `<option value="${a.id}" ${preselAlumnoId===a.id?'selected':''}>${a.nombre_completo}</option>`
     ).join('');
 
-  // Cargar problemáticas abiertas del alumno si ya está seleccionado
-  if (preselAlumnoId && probSel) _agCargarProbsAlumno(preselAlumnoId);
-  if (alumnoSel) {
-    alumnoSel.onchange = () => {
-      const aid = alumnoSel.value;
-      if (aid && probSel) _agCargarProbsAlumno(aid);
-    };
-  }
+  if (preselAlumnoId) _agCargarProbsAlumno(preselAlumnoId);
 }
 
 async function _agCargarProbsAlumno(alumnoId) {
