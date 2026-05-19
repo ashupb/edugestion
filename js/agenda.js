@@ -412,6 +412,7 @@ async function verEvento(id) {
   const tipo = TIPOS_EVENTO.find(t => t.id === e.tipo_id);
 
   const convGrupos = (e.convocatoria_grupos || [])
+    .filter(g => !e.es_cita_individual || g !== 'familias')
     .map(g => GRUPOS_CONV.find(x => x.id === g)?.label).filter(Boolean);
 
   const convPersonas = (e.convocados_ids || [])
@@ -464,14 +465,10 @@ async function verEvento(id) {
 
       rsvpHtml = `
         <div style="margin-top:10px;padding:10px;background:var(--surf2);border-radius:var(--rad);border-top:1px solid var(--brd)">
-          <div class="sec-lb" style="margin:0 0 6px">Alumno/a convocado/a</div>
-          <div style="font-size:12px;font-weight:600">${alumnoNom}${cursoTxt ? ` · ${cursoTxt}` : ''}</div>
-          <div style="margin-top:8px">
-            <div class="sec-lb" style="margin:0 0 4px">Respuesta de la familia</div>
-            <span style="font-size:12px">${estadoLabel}</span>
-            ${msgFam ? `<div style="margin-top:4px;font-size:11px;color:var(--txt2);font-style:italic">"${msgFam}"</div>` : ''}
-            ${accionesStaffHtml}
-          </div>
+          <div class="sec-lb" style="margin:0 0 4px">Respuesta de la familia</div>
+          <span style="font-size:12px">${estadoLabel}</span>
+          ${msgFam ? `<div style="margin-top:4px;font-size:11px;color:var(--txt2);font-style:italic">"${msgFam}"</div>` : ''}
+          ${accionesStaffHtml}
         </div>`;
     } else if ((e.convocatoria_grupos||[]).includes('familias')) {
       // Evento colectivo con familias: contador de RSVP
@@ -530,6 +527,14 @@ async function verEvento(id) {
           <div class="sec-lb" style="margin:0 0 2px">Lugar</div>
           <div style="font-size:12px">${e.lugar || '—'}</div>
         </div>
+        ${e.es_cita_individual && e.alumnos ? `
+        <div style="grid-column:1/-1">
+          <div class="sec-lb" style="margin:0 0 2px">Familia convocada</div>
+          <div style="font-size:12px;font-weight:600">
+            ${[e.alumnos.apellido, e.alumnos.nombre].filter(Boolean).join(', ')}
+            ${e.alumnos.cursos ? ` · ${e.alumnos.cursos.nombre}${e.alumnos.cursos.division ? ' ' + e.alumnos.cursos.division : ''}` : ''}
+          </div>
+        </div>` : ''}
         ${convGrupos.length ? `
         <div>
           <div class="sec-lb" style="margin:0 0 2px">Convocatoria</div>

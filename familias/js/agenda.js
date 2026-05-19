@@ -79,18 +79,28 @@ async function rAgenda() {
   const desde = _famIsoFecha(FAM_AGENDA_ANIO, FAM_AGENDA_MES + 1, 1);
   const hasta  = _famIsoFecha(FAM_AGENDA_ANIO, FAM_AGENDA_MES + 1, ultimoDia.getDate());
 
-  const { data: rawEvs } = await sb
-    .from('eventos_institucionales')
-    .select('id, nombre, fecha_inicio, fecha_fin, hora, hora_fin, lugar, nivel, descripcion, convocatoria_grupos, cursos_familias_ids')
-    .eq('institucion_id', instId)
-    .eq('es_cita_individual', false)
-    .lte('fecha_inicio', hasta)
-    .or(`fecha_fin.gte.${desde},fecha_inicio.gte.${desde}`)
-    .order('fecha_inicio');
-
+  const alumnoId      = ALUMNO_ACTUAL?.id;
   const cursoIdAlumno = ALUMNO_ACTUAL?.cursos?.id;
 
-  // Solo eventos para familias (por convocatoria) + nivel + cursos específicos
+  const [{ data: rawEvs }, { data: citasIndiv }] = await Promise.all([
+    sb.from('eventos_institucionales')
+      .select('id, nombre, fecha_inicio, fecha_fin, hora, hora_fin, lugar, nivel, descripcion, convocatoria_grupos, cursos_familias_ids')
+      .eq('institucion_id', instId)
+      .eq('es_cita_individual', false)
+      .lte('fecha_inicio', hasta)
+      .or(`fecha_fin.gte.${desde},fecha_inicio.gte.${desde}`)
+      .order('fecha_inicio'),
+    alumnoId
+      ? sb.from('eventos_institucionales')
+          .select('id, nombre, fecha_inicio, fecha_fin, hora, hora_fin, lugar, nivel, descripcion')
+          .eq('alumno_id', alumnoId)
+          .eq('es_cita_individual', true)
+          .lte('fecha_inicio', hasta)
+          .or(`fecha_fin.gte.${desde},fecha_inicio.gte.${desde}`)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  // Solo eventos colectivos para familias (por convocatoria) + nivel + cursos específicos
   _famAgEvs = (rawEvs || []).filter(e => {
     const grupos = e.convocatoria_grupos || [];
     if (!grupos.some(g => ['familias', 'todos', 'comunidad'].includes(g))) return false;
@@ -102,6 +112,21 @@ async function rAgenda() {
     }
     return true;
   });
+
+  // Agregar citas individuales aceptadas al calendario
+  if (citasIndiv?.length) {
+    const { data: rsvps } = await sb
+      .from('evento_respuestas')
+      .select('evento_id')
+      .eq('usuario_id', USUARIO_FAMILIAR.id)
+      .eq('respuesta', 'acepta')
+      .in('evento_id', citasIndiv.map(c => c.id));
+    const aceptadasSet = new Set((rsvps || []).map(r => r.evento_id));
+    const citasEnAgenda = citasIndiv
+      .filter(c => aceptadasSet.has(c.id))
+      .map(c => ({ ...c, _cita_confirmada: true }));
+    _famAgEvs = [..._famAgEvs, ...citasEnAgenda];
+  }
 
   // Si el día seleccionado cayó fuera del mes, resetear
   if (FAM_AGENDA_DIA < desde || FAM_AGENDA_DIA > hasta) {
@@ -192,10 +217,13 @@ function _famBuildCalGrid(primerDia, ultimoDia) {
         <div class="fam-cal-num${esHoy?' hoy':''}">${dia}</div>
         ${ferNom ? `<div class="fam-cal-chip fam-cal-chip-fer" title="${ferNom}">🇦🇷 ${ferNom.length>11?ferNom.slice(0,11)+'…':ferNom}</div>` : ''}
         ${evs.slice(0, maxChips).map(e => {
-          const nc = FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos;
+          const nc = e._cita_confirmada
+            ? { color: '#1a7a4a', bg: '#e8f5ee' }
+            : (FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos);
           const txt = e.nombre.length > 13 ? e.nombre.slice(0,13)+'…' : e.nombre;
+          const prefix = e._cita_confirmada ? '✅ ' : (e.hora ? e.hora.slice(0,5)+' ' : '');
           return `<div class="fam-cal-chip" style="background:${nc.bg};color:${nc.color};border-color:${nc.color}50"
-            title="${e.nombre}">${e.hora?e.hora.slice(0,5)+' ':''}${txt}</div>`;
+            title="${e.nombre}">${prefix}${txt}</div>`;
         }).join('')}
         ${evs.length > maxChips ? `<div class="fam-cal-mas">+${evs.length - maxChips} más</div>` : ''}
         <div class="fam-cal-dots">
@@ -258,7 +286,9 @@ function _famRenderDiaLista(iso) {
     html += `<div class="fam-ag-empty">Sin eventos este día</div>`;
   } else {
     html += evsDelDia.map(e => {
-      const nc = FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos;
+      const nc = e._cita_confirmada
+        ? { color: '#1a7a4a', bg: '#e8f5ee', label: '✅ Cita confirmada' }
+        : (FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos);
       return `
         <div class="fam-ag-item" onclick="famVerEvento('${e.id}')">
           <div class="fam-ag-item-hora">${e.hora ? e.hora.slice(0,5) : '—'}</div>
@@ -299,45 +329,57 @@ async function famVerEvento(id) {
   }
   if (!e) return;
 
-  const nc = FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos;
+  const esCitaConfirmada = !!e._cita_confirmada;
+  const nc = esCitaConfirmada
+    ? { color: '#1a7a4a', bg: '#e8f5ee', label: '✅ Cita confirmada' }
+    : (FAM_NIVEL_CFG[e.nivel] || FAM_NIVEL_CFG.todos);
 
   // Hora con rango si hay hora_fin
   const horaTxt = e.hora
     ? `${e.hora.slice(0,5)}${e.hora_fin ? ' — '+e.hora_fin.slice(0,5) : ''}`
     : '';
 
-  // Fetch RSVP actual del familiar
-  let miRsvp = null;
-  try {
-    const { data: rsvpData } = await sb
-      .from('evento_respuestas')
-      .select('respuesta')
-      .eq('evento_id', id)
-      .eq('usuario_id', USUARIO_FAMILIAR.id)
-      .maybeSingle();
-    miRsvp = rsvpData?.respuesta || null;
-  } catch(_) {}
+  let rsvpHtml = '';
+  if (esCitaConfirmada) {
+    // Cita individual confirmada: solo mostrar estado, sin botones RSVP
+    rsvpHtml = `
+      <div style="margin-top:14px;padding:10px 12px;background:#e8f5ee;border-radius:8px;font-size:13px;color:#1a7a4a;font-weight:600">
+        ✅ Cita confirmada — te esperamos
+      </div>`;
+  } else {
+    // Evento colectivo: RSVP normal
+    let miRsvp = null;
+    try {
+      const { data: rsvpData } = await sb
+        .from('evento_respuestas')
+        .select('respuesta')
+        .eq('evento_id', id)
+        .eq('usuario_id', USUARIO_FAMILIAR.id)
+        .maybeSingle();
+      miRsvp = rsvpData?.respuesta || null;
+    } catch(_) {}
 
-  const rsvpHtml = `
-    <div style="margin-top:14px;padding-top:12px;border-top:1.5px solid var(--color-border,rgba(0,0,0,0.07))">
-      <div style="font-size:11px;font-weight:600;color:var(--color-text-medium);margin-bottom:8px">¿Asistís?</div>
-      <div style="display:flex;gap:8px">
-        <button id="rsvp-asistire-${id}" onclick="_famRsvpEvento('${id}','asistire')"
-          style="flex:1;padding:9px;border-radius:8px;border:1.5px solid ${miRsvp==='asistire'?'var(--color-green)':'rgba(0,0,0,0.12)'};
-            background:${miRsvp==='asistire'?'#e8f5ee':'var(--color-white)'};
-            color:${miRsvp==='asistire'?'var(--color-green)':'var(--color-text-medium)'};
-            font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">
-          ✓ Asistiré
-        </button>
-        <button id="rsvp-no-${id}" onclick="_famRsvpEvento('${id}','no_asistire')"
-          style="flex:1;padding:9px;border-radius:8px;border:1.5px solid ${miRsvp==='no_asistire'?'#d63b2f':'rgba(0,0,0,0.12)'};
-            background:${miRsvp==='no_asistire'?'#fdf0ee':'var(--color-white)'};
-            color:${miRsvp==='no_asistire'?'#d63b2f':'var(--color-text-medium)'};
-            font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">
-          ✕ No asistiré
-        </button>
-      </div>
-    </div>`;
+    rsvpHtml = `
+      <div style="margin-top:14px;padding-top:12px;border-top:1.5px solid var(--color-border,rgba(0,0,0,0.07))">
+        <div style="font-size:11px;font-weight:600;color:var(--color-text-medium);margin-bottom:8px">¿Asistís?</div>
+        <div style="display:flex;gap:8px">
+          <button id="rsvp-asistire-${id}" onclick="_famRsvpEvento('${id}','asistire')"
+            style="flex:1;padding:9px;border-radius:8px;border:1.5px solid ${miRsvp==='asistire'?'var(--color-green)':'rgba(0,0,0,0.12)'};
+              background:${miRsvp==='asistire'?'#e8f5ee':'var(--color-white)'};
+              color:${miRsvp==='asistire'?'var(--color-green)':'var(--color-text-medium)'};
+              font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">
+            ✓ Asistiré
+          </button>
+          <button id="rsvp-no-${id}" onclick="_famRsvpEvento('${id}','no_asistire')"
+            style="flex:1;padding:9px;border-radius:8px;border:1.5px solid ${miRsvp==='no_asistire'?'#d63b2f':'rgba(0,0,0,0.12)'};
+              background:${miRsvp==='no_asistire'?'#fdf0ee':'var(--color-white)'};
+              color:${miRsvp==='no_asistire'?'#d63b2f':'var(--color-text-medium)'};
+              font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">
+            ✕ No asistiré
+          </button>
+        </div>
+      </div>`;
+  }
 
   detEl.innerHTML = `
     <div class="fam-ag-detalle-card" style="border-left:4px solid ${nc.color}">
