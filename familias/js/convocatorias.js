@@ -67,10 +67,11 @@ function _convCardHtml(e, rsvp) {
   const msgActual = rsvp?.mensaje   || '';
 
   const ESTADO_CFG = {
-    pendiente: { label: 'Pendiente de respuesta',       color: '#b8963e', bg: '#fdf6e8' },
-    acepta:    { label: '✓ Aceptada',                   color: '#1a7a4a', bg: '#e8f5ee' },
-    rechaza:   { label: '✗ Rechazada',                  color: '#d63b2f', bg: '#fdf0ee' },
-    cancela:   { label: '⚠ Cancelada / A reprogramar',  color: '#b45309', bg: '#fff7ed' },
+    pendiente: { label: 'Pendiente de respuesta',         color: '#b8963e', bg: '#fdf6e8' },
+    acepta:    { label: '✓ Aceptada',                     color: '#1a7a4a', bg: '#e8f5ee' },
+    rechaza:   { label: '✗ Rechazada',                    color: '#d63b2f', bg: '#fdf0ee' },
+    cancela:   { label: '⚠ Cancelada / A reprogramar',    color: '#b45309', bg: '#fff7ed' },
+    propone:   { label: '↩ Propone otro horario',         color: '#1a6fc4', bg: '#e8f0fe' },
   };
   const cfg = ESTADO_CFG[estado] || ESTADO_CFG.pendiente;
 
@@ -85,7 +86,7 @@ function _convCardHtml(e, rsvp) {
 
   const organizador = e.usuarios?.nombre_completo || '';
 
-  const msgLabel = estado === 'cancela' ? 'Tu aviso:' : 'Tu mensaje:';
+  const msgLabel = estado === 'cancela' ? 'Tu aviso:' : estado === 'propone' ? 'Tu propuesta:' : 'Tu mensaje:';
 
   // ── Área de acciones según estado ──────────────────
   let accionesHtml = '';
@@ -98,7 +99,7 @@ function _convCardHtml(e, rsvp) {
       <textarea id="conv-msg-${e.id}" rows="2"
         style="width:100%;border:1.5px solid rgba(0,0,0,0.12);border-radius:8px;padding:8px 10px;font-size:12px;font-family:inherit;color:var(--color-dark);background:var(--color-white);resize:none;box-sizing:border-box;margin-bottom:8px;outline:none"
         placeholder="Mensaje opcional — ej: puedo el jueves a las 16hs..."></textarea>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;margin-bottom:6px">
         <button onclick="_convResponder('${e.id}','acepta')"
           style="flex:1;padding:10px;border-radius:8px;border:none;background:var(--color-green,#229957);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">
           ✓ Acepto
@@ -107,7 +108,11 @@ function _convCardHtml(e, rsvp) {
           style="flex:1;padding:10px;border-radius:8px;border:1.5px solid #d63b2f;background:transparent;color:#d63b2f;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">
           ✕ Rechazo
         </button>
-      </div>`;
+      </div>
+      <button onclick="_convProponer('${e.id}')"
+        style="width:100%;padding:9px;border-radius:8px;border:1.5px solid #1a6fc4;background:transparent;color:#1a6fc4;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
+        ↩ Proponer otro horario
+      </button>`;
 
   } else if (estado === 'acepta') {
     accionesHtml = `
@@ -137,7 +142,7 @@ function _convCardHtml(e, rsvp) {
       </div>`;
 
   } else {
-    // rechaza o cancela: permite cambiar respuesta
+    // rechaza, cancela o propone: permite cambiar respuesta
     accionesHtml = `
       <button onclick="_convCambiarRespuesta('${e.id}')"
         style="font-size:11px;color:var(--color-green,#229957);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;font-family:inherit">
@@ -232,13 +237,25 @@ async function _convCancelar(eventoId) {
     }
 
     rConvocatorias();
-  } catch (_) {
+  } catch (err) {
+    console.error('convCancelar error:', err);
     alert('No se pudo enviar el aviso. Intentá de nuevo.');
     if (btn) { btn.disabled = false; btn.textContent = 'Enviar aviso'; }
   }
 }
 
-// ── Guardar respuesta inicial (acepta / rechaza) ───────
+// ── Validar y enviar propuesta de horario ──────────────
+function _convProponer(eventoId) {
+  const ta = document.getElementById(`conv-msg-${eventoId}`);
+  if (!ta?.value?.trim()) {
+    if (ta) { ta.focus(); ta.style.borderColor = '#d63b2f'; }
+    return;
+  }
+  if (ta) ta.style.borderColor = '';
+  _convResponder(eventoId, 'propone');
+}
+
+// ── Guardar respuesta inicial (acepta / rechaza / propone) ─
 async function _convResponder(eventoId, respuesta) {
   const mensaje = document.getElementById(`conv-msg-${eventoId}`)?.value?.trim() || null;
   const card    = document.getElementById(`conv-card-${eventoId}`);
@@ -270,7 +287,9 @@ async function _convResponder(eventoId, respuesta) {
       const toNotif = [...new Set([evento.creado_por, ...(evento.convocados_ids || [])])].filter(Boolean);
       if (toNotif.length) {
         const alumnoNom = ALUMNO_ACTUAL?.nombre_completo || 'el alumno';
-        const verbo     = respuesta === 'acepta' ? 'aceptó' : 'rechazó';
+        const verbo = respuesta === 'acepta'  ? 'aceptó'
+                    : respuesta === 'rechaza' ? 'rechazó'
+                    : 'propone otro horario para';
         await sb.from('notificaciones').insert(
           toNotif.map(uid => ({
             usuario_id:       uid,
@@ -285,7 +304,8 @@ async function _convResponder(eventoId, respuesta) {
     }
 
     rConvocatorias();
-  } catch (_) {
+  } catch (err) {
+    console.error('convResponder error:', err);
     alert('No se pudo enviar la respuesta. Intentá de nuevo.');
     card?.querySelectorAll('button').forEach(b => b.disabled = false);
   }

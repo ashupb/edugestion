@@ -437,7 +437,7 @@ async function verEvento(id) {
       const respFam   = rsvpArr.find(r => !Object.values(USUARIOS_INST).find(u => u.id === r.usuario_id));
       const estadoFam = respFam?.respuesta || 'pendiente';
       const msgFam    = respFam?.mensaje || '';
-      const estadoLabel = { pendiente: '⏳ Sin respuesta', acepta: '✅ Aceptó', rechaza: '❌ Rechazó', cancela: '⚠ Canceló / Solicita reprogramar' }[estadoFam] || estadoFam;
+      const estadoLabel = { pendiente: '⏳ Sin respuesta', acepta: '✅ Aceptó', rechaza: '❌ Rechazó', cancela: '⚠ Canceló / Solicita reprogramar', propone: '↩ Propone otro horario' }[estadoFam] || estadoFam;
       rsvpHtml = `
         <div style="margin-top:10px;padding:10px;background:var(--surf2);border-radius:var(--rad);border-top:1px solid var(--brd)">
           <div class="sec-lb" style="margin:0 0 6px">Alumno/a convocado/a</div>
